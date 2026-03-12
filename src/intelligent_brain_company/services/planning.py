@@ -36,19 +36,21 @@ class PlanningOrchestrator:
         self,
         brief: IdeaBrief,
         interventions: list[UserIntervention] | None = None,
+        language: str = "en-US",
     ) -> ProjectPlan:
-        return self.pipeline.run(brief=brief, interventions=interventions)
+        return self.pipeline.run(brief=brief, interventions=interventions, language=language)
 
     def build_plan_for_stage(
         self,
         brief: IdeaBrief,
         stage: Stage,
         interventions: list[UserIntervention] | None = None,
+        language: str = "en-US",
     ) -> ProjectPlan:
-        return self.pipeline.run_until(brief=brief, stage=stage, interventions=interventions)
+        return self.pipeline.run_until(brief=brief, stage=stage, interventions=interventions, language=language)
 
-    def render_plan(self, plan: ProjectPlan) -> str:
-        return self.pipeline.render_markdown(plan)
+    def render_plan(self, plan: ProjectPlan, language: str = "en-US") -> str:
+        return self.pipeline.render_markdown(plan, language=language)
 
-    def render_stage(self, plan: ProjectPlan, stage: Stage) -> str:
-        return self.pipeline.render_stage_markdown(plan, stage)
+    def render_stage(self, plan: ProjectPlan, stage: Stage, language: str = "en-US") -> str:
+        return self.pipeline.render_stage_markdown(plan, stage, language=language)

@@ -2,10 +2,222 @@ const state = {
   projects: [],
   activeProject: null,
   chatHistoryByProject: {},
+  activeLanguage: 'zh-CN',
+  employeeRosterByProjectAgent: {},
+}
+
+const DEPARTMENT_AGENTS = new Set(['hardware', 'software', 'design', 'marketing', 'finance'])
+
+const LANGUAGE_SEQUENCE = ['zh-CN', 'en-US']
+
+const I18N = {
+  'zh-CN': {
+    languageToggle: '语言: 中文',
+    languageSwitching: '正在切换语言...',
+    languageSaved: '语言已切换，后续新生成对话将使用中文。',
+    languageError: '语言切换失败',
+    chatReady: '聊天内容可以提升为正式干预，再用“执行下一环节”逐步重算。',
+    interventionSaved: '干预已记录。请点击“执行下一环节”逐步重算。',
+    chatSending: '正在发送消息...',
+    chatReceived: '已收到回复，可直接提升为正式干预。',
+    chatPromoting: '正在转为正式干预...',
+    promoteButton: '转成正式干预',
+    promotedNoRegenerate: '已转为正式干预。请点击“执行下一环节”逐步重算。',
+    employeePickerButton: '选择员工 @',
+    employeePickerNotDepartment: '当前角色不是部门角色，无可选员工。',
+    employeePickerEmpty: '当前部门暂无可选员工。',
+    employeeMentionHint: '点击后将插入 @员工 进行定向提问。',
+    sourceStageReview: '阶段评审输出',
+    sourceEmployeeStatement: '员工发言',
+    sourceSuggestedStage: '建议阶段',
+    impactSuggested: '建议影响',
+    impactSource: '来源',
+    emptyCurrentStage: '当前环节下还没有可展示的记录。',
+    emptyAll: '当前角色还没有对话记录。',
+    generatedFromTurn: '已根据 {turnId} 生成新版本。',
+    agentNames: {
+      research: '研究组',
+      board: '董事会',
+      hardware: '硬件组',
+      software: '软件组',
+      design: '设计组',
+      marketing: '营销组',
+      finance: '财务组',
+    },
+    userName: '你',
+    stageReplayName: '阶段评审回放',
+    employeeFallback: '员工',
+  },
+  'en-US': {
+    languageToggle: 'Language: English',
+    languageSwitching: 'Switching language...',
+    languageSaved: 'Language switched. New generated turns will use English.',
+    languageError: 'Language switch failed',
+    chatReady: 'Chat replies can be promoted to interventions, then regenerate step by step via Run Next Stage.',
+    interventionSaved: 'Intervention recorded. Use Run Next Stage for step-by-step regeneration.',
+    chatSending: 'Sending message...',
+    chatReceived: 'Reply received. You can promote it to an intervention directly.',
+    chatPromoting: 'Promoting chat turn to intervention...',
+    promoteButton: 'Promote to intervention',
+    promotedNoRegenerate: 'Promoted to intervention. Use "Run Next Stage" to regenerate step by step.',
+    employeePickerButton: 'Pick Employee @',
+    employeePickerNotDepartment: 'Current role is not a department role.',
+    employeePickerEmpty: 'No employees available for this department.',
+    employeeMentionHint: 'Click one to insert @mention for directed questions.',
+    sourceStageReview: 'Stage review output',
+    sourceEmployeeStatement: 'Employee statement',
+    sourceSuggestedStage: 'Suggested stage',
+    impactSuggested: 'Suggested impact',
+    impactSource: 'Source',
+    emptyCurrentStage: 'No records available for the current stage yet.',
+    emptyAll: 'No dialogue history for this role yet.',
+    generatedFromTurn: 'Generated a new version from {turnId}.',
+    agentNames: {
+      research: 'Research Team',
+      board: 'Board',
+      hardware: 'Hardware Team',
+      software: 'Software Team',
+      design: 'Design Team',
+      marketing: 'Marketing Team',
+      finance: 'Finance Team',
+    },
+    userName: 'You',
+    stageReplayName: 'Stage Replay',
+    employeeFallback: 'Employee',
+  },
+}
+
+const STAGE_NAMES = {
+  'zh-CN': {
+    intake: 'Intake 需求录入',
+    research: '研究评估',
+    department_design: '部门方案',
+    roundtable: '跨部门圆桌',
+    synthesis: '综合决策',
+    board: '董事会评审',
+  },
+  'en-US': {
+    intake: 'Intake',
+    research: 'Research',
+    department_design: 'Department Design',
+    roundtable: 'Roundtable',
+    synthesis: 'Synthesis',
+    board: 'Board',
+  },
+}
+
+const STAGE_STATUS_NAMES = {
+  'zh-CN': { completed: '已完成', current: '进行中', pending: '待开始' },
+  'en-US': { completed: 'Completed', current: 'Current', pending: 'Pending' },
+}
+
+const PROJECT_STATUS_NAMES = {
+  'zh-CN': { created: '已创建', planning: '规划中', reviewing: '评审中', completed: '已完成', failed: '失败' },
+  'en-US': { created: 'Created', planning: 'Planning', reviewing: 'Reviewing', completed: 'Completed', failed: 'Failed' },
+}
+
+const NEXT_STAGE_ACTION_I18N = {
+  'zh-CN': {
+    intake: '执行研究阶段',
+    research: '执行部门评审',
+    department_design: '执行跨部门评审',
+    roundtable: '执行方案综合',
+    synthesis: '执行董事会评审',
+    board: '已完成全部环节',
+  },
+  'en-US': {
+    intake: 'Run Research',
+    research: 'Run Department Review',
+    department_design: 'Run Roundtable Review',
+    roundtable: 'Run Synthesis',
+    synthesis: 'Run Board Review',
+    board: 'All Stages Completed',
+  },
+}
+
+const EMPLOYEE_NAME_ZH = {
+  'Maya Chen': '陈思雨', 'David Okoro': '李承泽', 'Amara Osei': '王安雅', 'Luca Neri': '赵景行',
+  'Noah Bennett': '周彦霖', 'Sofia Martins': '林若彤', 'Priya Raman': '许嘉宁', 'Ethan Cole': '孙启航',
+  'Iris Novak': '吴清妍', 'Kenji Watanabe': '郭明远', 'Marta Silva': '何诗妍', 'Felix Park': '郑亦辰',
+  'Elena Rossi': '沈知夏', 'Haruto Sato': '叶子昂', 'Amina Farouk': '唐语薇', 'Jonas Weber': '顾闻舟',
+  'Camila Duarte': '宋可欣', 'Leah Kim': '韩以宁', 'Mateo Alvarez': '陆泽宇', 'Rina Takahashi': '高若琳',
+  'Oliver Grant': '梁书豪', 'Nadia Ibrahim': '冯雨桐', 'Grace Liu': '许知微', 'Tomas Novak': '曹景川',
+  'Yuna Choi': '崔安然', 'Marco Bellini': '彭远航',
+}
+
+const TITLE_ZH = {
+  'Trend Research Lead': '趋势研究负责人', 'Feedback Synthesis Manager': '反馈综合经理', 'Reality Validation Specialist': '现实验证专员',
+  'Executive Insight Writer': '高层洞察撰写人', 'Embedded Systems Engineer': '嵌入式系统工程师', 'Rapid Prototype Lead': '快速原型负责人',
+  'Reliability Operations Engineer': '可靠性运维工程师', 'Hardware QA Certifier': '硬件质量认证工程师', 'Backend Architecture Lead': '后端架构负责人',
+  'Applied AI Engineer': '应用 AI 工程师', 'DevOps Automation Engineer': 'DevOps 自动化工程师', 'API Quality Specialist': 'API 质量专家',
+  'UX Architecture Director': '用户体验架构总监', 'UI Design Lead': '界面设计负责人', 'UX Research Specialist': '用户体验研究专员',
+  'Brand Guardian': '品牌守护者', 'Experience Delight Designer': '体验惊喜设计师', 'Growth Strategy Lead': '增长策略负责人',
+  'Content Program Manager': '内容项目经理', 'Social Strategy Specialist': '社媒策略专家', 'Market Pulse Analyst': '市场脉搏分析师',
+  'App Growth Optimization Manager': '应用增长优化经理', 'Finance Tracking Lead': '财务跟踪负责人', 'Business Intelligence Analyst': '商业智能分析师',
+  'Compliance and Risk Counsel': '合规与风险顾问', 'Strategic Reporting Manager': '战略报告经理',
+}
+
+const EMPLOYEE_NAME_EN = Object.fromEntries(Object.entries(EMPLOYEE_NAME_ZH).map(([en, zh]) => [zh, en]))
+const TITLE_EN = Object.fromEntries(Object.entries(TITLE_ZH).map(([en, zh]) => [zh, en]))
+
+function stageLabel(stage) {
+  return STAGE_NAMES[normalizeLanguage(state.activeLanguage)]?.[stage] || stage
+}
+
+function stageStatusLabel(status) {
+  return STAGE_STATUS_NAMES[normalizeLanguage(state.activeLanguage)]?.[status] || status
+}
+
+function projectStatusLabel(status) {
+  return PROJECT_STATUS_NAMES[normalizeLanguage(state.activeLanguage)]?.[status] || status
+}
+
+function localizeEmployeeName(name) {
+  const text = String(name || '')
+  if (normalizeLanguage(state.activeLanguage) === 'zh-CN') {
+    return EMPLOYEE_NAME_ZH[text] || text
+  }
+  return EMPLOYEE_NAME_EN[text] || text
+}
+
+function localizeEmployeeTitle(title) {
+  const text = String(title || '')
+  if (normalizeLanguage(state.activeLanguage) === 'zh-CN') {
+    return TITLE_ZH[text] || text
+  }
+  return TITLE_EN[text] || text
+}
+
+function employeeRole(name, title) {
+  const localizedName = localizeEmployeeName(name)
+  if (!title) return localizedName
+  const localizedTitle = localizeEmployeeTitle(title)
+  return normalizeLanguage(state.activeLanguage) === 'zh-CN'
+    ? `${localizedName}（${localizedTitle}）`
+    : `${localizedName} (${localizedTitle})`
+}
+
+function normalizeLanguage(language) {
+  return LANGUAGE_SEQUENCE.includes(language) ? language : 'zh-CN'
+}
+
+function locale() {
+  return I18N[normalizeLanguage(state.activeLanguage)]
+}
+
+function t(key, vars = {}) {
+  const value = locale()[key] || I18N['zh-CN'][key] || key
+  return Object.entries(vars).reduce((acc, [name, replacement]) => {
+    return acc.replaceAll(`{${name}}`, String(replacement))
+  }, value)
 }
 
 function getCachedChatHistory(projectId, agent) {
   return state.chatHistoryByProject[projectId]?.[agent] || []
+}
+
+function getCachedEmployeeRoster(projectId, agent) {
+  return state.employeeRosterByProjectAgent[projectId]?.[agent] || []
 }
 
 function setCachedChatHistory(projectId, agent, history) {
@@ -13,6 +225,17 @@ function setCachedChatHistory(projectId, agent, history) {
     state.chatHistoryByProject[projectId] = {}
   }
   state.chatHistoryByProject[projectId][agent] = history
+}
+
+function setCachedEmployeeRoster(projectId, agent, employees) {
+  if (!state.employeeRosterByProjectAgent[projectId]) {
+    state.employeeRosterByProjectAgent[projectId] = {}
+  }
+  state.employeeRosterByProjectAgent[projectId][agent] = employees
+}
+
+function isDepartmentAgent(agent) {
+  return DEPARTMENT_AGENTS.has(String(agent || ''))
 }
 
 const projectList = document.getElementById('project-list')
@@ -33,10 +256,14 @@ const chatHistoryScopeSelect = document.getElementById('chat-history-scope')
 const chatHistory = document.getElementById('chat-history')
 const chatStatus = document.getElementById('chat-status')
 const sendChatButton = document.getElementById('send-chat')
+const languageToggleButton = document.getElementById('language-toggle')
 const refreshChatButton = document.getElementById('refresh-chat')
+const employeePickerToggleButton = document.getElementById('employee-picker-toggle')
+const employeePickerPanel = document.getElementById('employee-picker-panel')
 const generatePlanButton = document.getElementById('generate-plan')
 const submitInterventionButton = document.getElementById('submit-intervention')
 const loadDiffButton = document.getElementById('load-diff')
+const interventionStageSelect = document.querySelector('#intervention-form select[name="stage"]')
 
 const NEXT_STAGE_ACTION = {
   intake: '执行研究阶段',
@@ -48,32 +275,44 @@ const NEXT_STAGE_ACTION = {
 }
 
 const AGENT_PROFILES = {
-  research: { name: '研究组', avatar: '研', hue: 198 },
-  board: { name: '董事会', avatar: '董', hue: 16 },
-  hardware: { name: '硬件组', avatar: '硬', hue: 32 },
-  software: { name: '软件组', avatar: '软', hue: 220 },
-  design: { name: '设计组', avatar: '设', hue: 284 },
-  marketing: { name: '营销组', avatar: '营', hue: 138 },
-  finance: { name: '财务组', avatar: '财', hue: 50 },
+  research: { avatar: '研', hue: 198 },
+  board: { avatar: '董', hue: 16 },
+  hardware: { avatar: '硬', hue: 32 },
+  software: { avatar: '软', hue: 220 },
+  design: { avatar: '设', hue: 284 },
+  marketing: { avatar: '营', hue: 138 },
+  finance: { avatar: '财', hue: 50 },
 }
 
-const USER_PROFILE = { name: '你', avatar: '你', hue: 188 }
-const STAGE_REPLAY_PROFILE = { name: '阶段评审回放', avatar: '回', hue: 270 }
+function userProfile() {
+  return { name: t('userName'), avatar: '你', hue: 188 }
+}
+
+function stageReplayProfile() {
+  return { name: t('stageReplayName'), avatar: '回', hue: 270 }
+}
 
 function profileByAgent(agent) {
-  return AGENT_PROFILES[agent] || { name: agent, avatar: String(agent || '?').slice(0, 1), hue: 210 }
+  const profile = AGENT_PROFILES[agent]
+  if (!profile) {
+    return { name: agent, avatar: String(agent || '?').slice(0, 1), hue: 210 }
+  }
+  return {
+    ...profile,
+    name: locale().agentNames[agent] || agent,
+  }
 }
 
 function profileByTurn(agent, turn) {
   if (turn.source === 'stage_review') {
-    return STAGE_REPLAY_PROFILE
+    return stageReplayProfile()
   }
   if (turn.source === 'chat' && turn.speaker && turn.speaker !== agent) {
-    const speaker = String(turn.speaker)
+    const speaker = employeeRole(turn.speaker, turn.speaker_title)
     return { name: speaker, avatar: speaker.slice(0, 1), hue: 126 }
   }
   if (turn.source === 'employee_statement') {
-    const speaker = String(turn.speaker || '员工')
+    const speaker = employeeRole(turn.speaker || t('employeeFallback'), turn.speaker_title)
     return { name: speaker, avatar: speaker.slice(0, 1), hue: 94 }
   }
   return profileByAgent(agent)
@@ -97,9 +336,93 @@ function avatarStyle(profile) {
 }
 
 function updateGenerateButton(project) {
-  const action = NEXT_STAGE_ACTION[project.current_stage] || '执行下一环节'
+  const action = NEXT_STAGE_ACTION_I18N[normalizeLanguage(state.activeLanguage)]?.[project.current_stage]
+    || NEXT_STAGE_ACTION_I18N['zh-CN'][project.current_stage]
+    || '执行下一环节'
   generatePlanButton.textContent = action
   generatePlanButton.disabled = project.current_stage === 'board'
+}
+
+function renderLanguageButton() {
+  languageToggleButton.textContent = t('languageToggle')
+}
+
+function applyLanguageToChatUi() {
+  renderLanguageButton()
+  applyLanguageToStageSelector()
+  if (employeePickerToggleButton) {
+    employeePickerToggleButton.textContent = t('employeePickerButton')
+  }
+  renderEmployeePicker(chatAgentSelect.value)
+  if (!state.activeProject) {
+    chatStatus.textContent = t('chatReady')
+    return
+  }
+  const agent = chatAgentSelect.value
+  const history = getCachedChatHistory(state.activeProject.project_id, agent)
+  if (history.length) {
+    renderChat(agent, history)
+  } else {
+    chatStatus.textContent = t('chatReady')
+  }
+}
+
+function applyLanguageToStageSelector() {
+  if (!interventionStageSelect) return
+  Array.from(interventionStageSelect.options).forEach((option) => {
+    option.textContent = stageLabel(option.value)
+  })
+}
+
+function insertEmployeeMention(mentionKey) {
+  const input = document.getElementById('chat-message')
+  const original = input.value
+  const spacer = original && !original.endsWith(' ') ? ' ' : ''
+  input.value = `${original}${spacer}@${mentionKey} `
+  input.focus()
+}
+
+function renderEmployeePicker(agent) {
+  if (!employeePickerPanel || !employeePickerToggleButton) return
+  employeePickerToggleButton.textContent = t('employeePickerButton')
+  if (!state.activeProject) {
+    employeePickerToggleButton.disabled = true
+    employeePickerPanel.classList.add('hidden')
+    employeePickerPanel.innerHTML = ''
+    return
+  }
+  if (!isDepartmentAgent(agent)) {
+    employeePickerToggleButton.disabled = true
+    employeePickerPanel.innerHTML = `<div class="employee-item-meta" style="padding:10px 12px;">${escapeHtml(t('employeePickerNotDepartment'))}</div>`
+    return
+  }
+  employeePickerToggleButton.disabled = false
+  const employees = getCachedEmployeeRoster(state.activeProject.project_id, agent)
+  if (!employees.length) {
+    employeePickerPanel.innerHTML = `<div class="employee-item-meta" style="padding:10px 12px;">${escapeHtml(t('employeePickerEmpty'))}</div>`
+    return
+  }
+  employeePickerPanel.innerHTML = employees.map((employee) => {
+    const name = employeeRole(employee.name, employee.title)
+    return `
+      <button type="button" class="employee-item" data-mention="${escapeHtml(employee.mention_key)}">
+        <div class="employee-item-name">${escapeHtml(name)}</div>
+        <div class="employee-item-meta">@${escapeHtml(employee.mention_key)} · ${escapeHtml(t('employeeMentionHint'))}</div>
+      </button>
+    `
+  }).join('')
+}
+
+async function loadEmployeeRoster(projectId, agent) {
+  if (!projectId) return
+  if (!isDepartmentAgent(agent)) {
+    setCachedEmployeeRoster(projectId, agent, [])
+    renderEmployeePicker(agent)
+    return
+  }
+  const data = await api(`/api/projects/${projectId}/chat/employees?agent=${encodeURIComponent(agent)}`)
+  setCachedEmployeeRoster(projectId, agent, data.employees || [])
+  renderEmployeePicker(agent)
 }
 
 function resetProjectView() {
@@ -114,11 +437,15 @@ function resetProjectView() {
   diffTo.innerHTML = ''
   diffOutput.textContent = '至少需要两个版本。'
   chatHistory.innerHTML = ''
-  chatStatus.textContent = '聊天内容可以直接提升为正式干预并触发重算。'
+  chatStatus.textContent = t('chatReady')
   generatePlanButton.textContent = '执行下一环节'
   generatePlanButton.disabled = true
   submitInterventionButton.disabled = true
   sendChatButton.disabled = true
+  languageToggleButton.disabled = true
+  employeePickerToggleButton.disabled = true
+  employeePickerPanel.classList.add('hidden')
+  employeePickerPanel.innerHTML = ''
   refreshChatButton.disabled = true
   loadDiffButton.disabled = true
 }
@@ -158,16 +485,22 @@ async function api(path, options = {}) {
 
 function showProject(project) {
   state.activeProject = project
+  state.activeLanguage = normalizeLanguage(project.conversation_language)
+  renderLanguageButton()
   const recommendation = project.latest_plan?.scorecard?.recommendation
   projectName.textContent = project.name
+  const statusText = projectStatusLabel(project.status)
+  const stageText = stageLabel(project.current_stage)
   projectMeta.textContent = recommendation
-    ? `${project.status} · ${project.current_stage} · ${project.plans.length} 个版本 · 结论 ${recommendation}`
-    : `${project.status} · ${project.current_stage} · ${project.plans.length} 个版本`
+    ? `${statusText} · ${stageText} · ${project.plans.length} 个版本 · 结论 ${recommendation}`
+    : `${statusText} · ${stageText} · ${project.plans.length} 个版本`
   planMarkdown.textContent = project.latest_plan_markdown || '尚未生成计划。'
   renderScorecard(project.latest_plan?.scorecard || null)
   updateGenerateButton(project)
   submitInterventionButton.disabled = false
   sendChatButton.disabled = false
+  languageToggleButton.disabled = false
+  employeePickerToggleButton.disabled = !isDepartmentAgent(chatAgentSelect.value)
   refreshChatButton.disabled = false
   renderProjects()
   loadProgress(project.project_id)
@@ -244,7 +577,7 @@ function renderProjects() {
     openButton.type = 'button'
     openButton.innerHTML = `
       <div class="project-card-title">${project.name}</div>
-      <div class="project-card-meta">${project.status} · ${project.plans.length} versions</div>
+      <div class="project-card-meta">${projectStatusLabel(project.status)} · ${project.plans.length} ${normalizeLanguage(state.activeLanguage) === 'zh-CN' ? '个版本' : 'versions'}</div>
     `
     openButton.addEventListener('click', async () => {
       const fresh = await api(`/api/projects/${project.project_id}`)
@@ -273,11 +606,42 @@ function renderProgress(stages) {
     const item = document.createElement('div')
     item.className = 'stage-item'
     item.innerHTML = `
-      <div>${stage.label}</div>
-      <span class="stage-badge ${stage.status}">${stage.status}</span>
+      <div>${stageLabel(stage.stage)}</div>
+      <span class="stage-badge ${stage.status}">${stageStatusLabel(stage.status)}</span>
     `
     stageProgress.appendChild(item)
   })
+}
+
+function localizeTimelineTitle(event) {
+  const lang = normalizeLanguage(state.activeLanguage)
+  if (lang === 'zh-CN') {
+    if (event.type === 'project_created') return '项目创建'
+    if (event.type === 'plan_version') return `计划版本 ${event.version_index || ''}`.trim()
+    if (event.type === 'intervention') return `干预提交 · ${stageLabel(event.stage || 'research')}`
+    if (event.type === 'chat') return `与 ${profileByAgent(event.agent || '').name || event.agent} 对话`
+    if (event.type === 'task') return `任务 · ${event.title}`
+    return event.title || ''
+  }
+  if (event.type === 'project_created') return 'Project Created'
+  if (event.type === 'plan_version') return `Plan Version ${event.version_index || ''}`.trim()
+  if (event.type === 'intervention') return `Intervention · ${stageLabel(event.stage || 'research')}`
+  if (event.type === 'chat') return `Chat with ${profileByAgent(event.agent || '').name || event.agent}`
+  return event.title || ''
+}
+
+function localizeTimelineDetail(event) {
+  if (!event.detail) return ''
+  if (event.type === 'intervention') {
+    const raw = String(event.detail)
+    const separator = raw.indexOf(':')
+    if (separator > 0) {
+      const speaker = raw.slice(0, separator).trim()
+      const content = raw.slice(separator + 1).trim()
+      return `${localizeEmployeeName(speaker)}: ${content}`
+    }
+  }
+  return String(event.detail)
 }
 
 function renderTimeline(events) {
@@ -285,9 +649,11 @@ function renderTimeline(events) {
   events.forEach((event) => {
     const item = document.createElement('div')
     item.className = 'timeline-item'
+    const title = localizeTimelineTitle(event)
+    const detail = localizeTimelineDetail(event)
     item.innerHTML = `
-      <div class="timeline-title">${event.title}</div>
-      <div class="timeline-detail">${event.detail || ''}</div>
+      <div class="timeline-title">${title}</div>
+      <div class="timeline-detail">${detail || ''}</div>
       <div class="timeline-time">${new Date(event.timestamp).toLocaleString()}</div>
     `
     timeline.appendChild(item)
@@ -321,6 +687,7 @@ function renderDiffSelectors(plans) {
 
 function renderChat(agent, history) {
   const agentProfile = profileByAgent(agent)
+  const currentUserProfile = userProfile()
   const historyScope = chatHistoryScopeSelect?.value || 'all'
   const currentStage = state.activeProject?.current_stage
   const visibleHistory = historyScope === 'current_stage'
@@ -330,8 +697,8 @@ function renderChat(agent, history) {
   chatHistory.innerHTML = ''
   if (!visibleHistory.length) {
     const emptyText = historyScope === 'current_stage'
-      ? '当前环节下还没有可展示的记录。'
-      : '当前角色还没有对话记录。'
+      ? t('emptyCurrentStage')
+      : t('emptyAll')
     chatHistory.innerHTML = `
       <div class="chat-row incoming">
         <div class="chat-avatar" style="${avatarStyle(agentProfile)}">${escapeHtml(agentProfile.avatar)}</div>
@@ -356,12 +723,12 @@ function renderChat(agent, history) {
       userRow.innerHTML = `
         <div class="chat-bubble user">
           <div class="chat-bubble-head">
-            <span class="chat-role">${escapeHtml(USER_PROFILE.name)}</span>
+            <span class="chat-role">${escapeHtml(currentUserProfile.name)}</span>
             <span class="chat-time">${new Date(turn.created_at).toLocaleString()}</span>
           </div>
           <div class="chat-message">${formatChatBody(turn.user_message)}</div>
         </div>
-        <div class="chat-avatar" style="${avatarStyle(USER_PROFILE)}">${escapeHtml(USER_PROFILE.avatar)}</div>
+        <div class="chat-avatar" style="${avatarStyle(currentUserProfile)}">${escapeHtml(currentUserProfile.avatar)}</div>
       `
       chatHistory.appendChild(userRow)
     }
@@ -369,16 +736,18 @@ function renderChat(agent, history) {
     const reply = document.createElement('div')
     reply.className = 'chat-row incoming'
     const promoteButton = turn.can_promote_to_intervention
-      ? `<div class="chat-actions"><button class="chat-promote" data-turn-id="${turn.turn_id}">转成正式干预并重算</button></div>`
+      ? `<div class="chat-actions"><button class="chat-promote" data-turn-id="${turn.turn_id}">${t('promoteButton')}</button></div>`
       : ''
     const sourceLabel =
       source === 'stage_review'
-        ? '阶段评审输出'
+        ? t('sourceStageReview')
         : source === 'employee_statement'
-          ? '员工发言'
-          : `${turn.used_llm ? 'LLM' : 'Fallback'} · 建议阶段 ${escapeHtml(turn.suggested_stage)}`
+          ? t('sourceEmployeeStatement')
+          : `${turn.used_llm ? 'LLM' : 'Fallback'} · ${t('sourceSuggestedStage')} ${escapeHtml(turn.suggested_stage)}`
     const impactLabel =
-      source === 'chat' ? `建议影响: ${escapeHtml(turn.suggested_impact)}` : `来源: ${escapeHtml(turn.suggested_impact)}`
+      source === 'chat'
+        ? `${t('impactSuggested')}: ${escapeHtml(turn.suggested_impact)}`
+        : `${t('impactSource')}: ${escapeHtml(turn.suggested_impact)}`
     reply.innerHTML = `
       <div class="chat-avatar" style="${avatarStyle(replyProfile)}">${escapeHtml(replyProfile.avatar)}</div>
       <div class="chat-bubble agent">
@@ -424,6 +793,7 @@ async function loadProjects() {
 async function deleteProject(projectId) {
   await api(`/api/projects/${projectId}`, { method: 'DELETE' })
   delete state.chatHistoryByProject[projectId]
+  delete state.employeeRosterByProjectAgent[projectId]
   if (state.activeProject?.project_id === projectId) {
     state.activeProject = null
   }
@@ -438,6 +808,7 @@ async function createProject(payload, autoGenerate = false) {
       summary: payload.summary,
       constraints: payload.constraints || [],
       metrics: payload.metrics || [],
+      language: state.activeLanguage,
     }),
   })
   if (!autoGenerate) {
@@ -462,20 +833,52 @@ async function loadTimeline(projectId) {
 
 async function loadChat(projectId, agent) {
   const data = await api(`/api/projects/${projectId}/chat?agent=${encodeURIComponent(agent)}`)
+  if (data.language) {
+    state.activeLanguage = normalizeLanguage(data.language)
+    renderLanguageButton()
+  }
+  await loadEmployeeRoster(projectId, agent)
   setCachedChatHistory(projectId, agent, data.history)
   renderChat(data.agent, data.history)
 }
 
 async function promoteTurn(turnId) {
   if (!state.activeProject) return
-  chatStatus.textContent = '正在将聊天提升为正式干预并重算...'
+  chatStatus.textContent = t('chatPromoting')
   const data = await api(`/api/projects/${state.activeProject.project_id}/chat/promote`, {
     method: 'POST',
     body: JSON.stringify({ turn_id: turnId }),
   })
   showProject(data.project)
   await loadProjects()
-  chatStatus.textContent = `已根据 ${data.promoted_turn.turn_id} 生成新版本。`
+  chatStatus.textContent = t('promotedNoRegenerate')
+}
+
+async function toggleConversationLanguage() {
+  if (!state.activeProject) return
+  const currentIndex = LANGUAGE_SEQUENCE.indexOf(normalizeLanguage(state.activeLanguage))
+  const nextLanguage = LANGUAGE_SEQUENCE[(currentIndex + 1) % LANGUAGE_SEQUENCE.length]
+
+  chatStatus.textContent = t('languageSwitching')
+  try {
+    const data = await api(`/api/projects/${state.activeProject.project_id}/language`, {
+      method: 'POST',
+      body: JSON.stringify({ language: nextLanguage }),
+    })
+    state.activeLanguage = normalizeLanguage(data.language)
+    state.activeProject = {
+      ...state.activeProject,
+      conversation_language: state.activeLanguage,
+    }
+    applyLanguageToChatUi()
+    updateGenerateButton(state.activeProject)
+    renderProjects()
+    await loadProgress(state.activeProject.project_id)
+    await loadTimeline(state.activeProject.project_id)
+    chatStatus.textContent = t('languageSaved')
+  } catch (error) {
+    chatStatus.textContent = `${t('languageError')}: ${error.message}`
+  }
 }
 
 document.getElementById('create-project-form').addEventListener('submit', async (event) => {
@@ -506,7 +909,7 @@ generatePlanButton.addEventListener('click', async () => {
   })
   showProject(data.project)
   if (data.executed_stage) {
-    projectMeta.textContent = `${data.project.status} · ${data.project.current_stage} · 已执行环节 ${data.executed_stage}`
+    projectMeta.textContent = `${projectStatusLabel(data.project.status)} · ${stageLabel(data.project.current_stage)} · ${normalizeLanguage(state.activeLanguage) === 'zh-CN' ? '已执行环节' : 'executed stage'} ${stageLabel(data.executed_stage)}`
   }
   await loadProjects()
 })
@@ -527,6 +930,7 @@ document.getElementById('intervention-form').addEventListener('submit', async (e
   })
   showProject(data.project)
   await loadProjects()
+  chatStatus.textContent = t('interventionSaved')
 })
 
 document.getElementById('chat-form').addEventListener('submit', async (event) => {
@@ -536,14 +940,19 @@ document.getElementById('chat-form').addEventListener('submit', async (event) =>
   const message = messageField.value.trim()
   if (!message) return
   const agent = chatAgentSelect.value
-  chatStatus.textContent = '正在发送消息...'
+  chatStatus.textContent = t('chatSending')
   const data = await api(`/api/projects/${state.activeProject.project_id}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ agent, message }),
+    body: JSON.stringify({ agent, message, language: state.activeLanguage }),
   })
+  if (data.language) {
+    state.activeLanguage = normalizeLanguage(data.language)
+    renderLanguageButton()
+  }
   setCachedChatHistory(state.activeProject.project_id, agent, data.history)
   renderChat(data.agent, data.history)
-  chatStatus.textContent = '已收到回复，可直接提升为正式干预。'
+  chatStatus.textContent = t('chatReceived')
+  employeePickerPanel.classList.add('hidden')
   messageField.value = ''
 })
 
@@ -551,6 +960,20 @@ chatHistory.addEventListener('click', async (event) => {
   const button = event.target.closest('.chat-promote')
   if (!button) return
   await promoteTurn(button.dataset.turnId)
+})
+
+employeePickerToggleButton.addEventListener('click', () => {
+  if (!state.activeProject || !isDepartmentAgent(chatAgentSelect.value)) return
+  employeePickerPanel.classList.toggle('hidden')
+})
+
+employeePickerPanel.addEventListener('click', (event) => {
+  const button = event.target.closest('.employee-item')
+  if (!button) return
+  const mention = button.dataset.mention
+  if (!mention) return
+  insertEmployeeMention(mention)
+  employeePickerPanel.classList.add('hidden')
 })
 
 loadDiffButton.addEventListener('click', async () => {
@@ -562,12 +985,14 @@ loadDiffButton.addEventListener('click', async () => {
 })
 
 document.getElementById('refresh-projects').addEventListener('click', loadProjects)
+languageToggleButton.addEventListener('click', toggleConversationLanguage)
 refreshChatButton.addEventListener('click', async () => {
   if (!state.activeProject) return
   await loadChat(state.activeProject.project_id, chatAgentSelect.value)
 })
 chatAgentSelect.addEventListener('change', async () => {
   if (!state.activeProject) return
+  employeePickerPanel.classList.add('hidden')
   await loadChat(state.activeProject.project_id, chatAgentSelect.value)
 })
 chatHistoryScopeSelect.addEventListener('change', () => {
@@ -583,3 +1008,6 @@ loadProjects().catch((error) => {
 
 renderDemoProjects()
 renderScorecard(null)
+renderLanguageButton()
+applyLanguageToStageSelector()
+renderEmployeePicker(chatAgentSelect.value)

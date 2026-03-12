@@ -1,15 +1,31 @@
 from __future__ import annotations
 
 from difflib import unified_diff
+import re
 
 from flask import current_app, jsonify, request
 
+from intelligent_brain_company.agents.registry import department_teams
 from intelligent_brain_company.api import planning_bp
-from intelligent_brain_company.domain.models import Stage, UserIntervention
+from intelligent_brain_company.domain.models import Department, Stage, UserIntervention
 from intelligent_brain_company.domain.project_state import ProjectStatus, TaskRecord
 
 
 DEPARTMENT_AGENT_KEYS = {"hardware", "software", "design", "marketing", "finance"}
+SUPPORTED_CONVERSATION_LANGUAGES = {"zh-CN", "en-US"}
+
+
+def _normalize_conversation_language(language: str | None, fallback: str = "zh-CN") -> str:
+    if not language:
+        return fallback if fallback in SUPPORTED_CONVERSATION_LANGUAGES else "zh-CN"
+    value = str(language).strip()
+    if value in SUPPORTED_CONVERSATION_LANGUAGES:
+        return value
+    return fallback if fallback in SUPPORTED_CONVERSATION_LANGUAGES else "zh-CN"
+
+
+def _project_language(project) -> str:
+    return _normalize_conversation_language(getattr(project, "conversation_language", None), fallback="zh-CN")
 
 
 def _visible_stages_for_agent(agent: str) -> set[Stage]:
@@ -23,6 +39,10 @@ def _visible_stages_for_agent(agent: str) -> set[Stage]:
 
 
 def _build_stage_replay_history(project, agent: str) -> list[dict]:
+    # Department agents should focus on role-specific dialogue and employee statements.
+    # Stage markdown at these phases often contains all departments and causes noisy history.
+    if agent in DEPARTMENT_AGENT_KEYS:
+        return []
     visible_stages = _visible_stages_for_agent(agent)
     history: list[dict] = []
     for version in project.plans:
@@ -62,7 +82,14 @@ def _build_employee_discussion_history(project, agent: str) -> list[dict]:
         if agent in DEPARTMENT_AGENT_KEYS and review.department.value != agent:
             continue
         for index, line in enumerate(review.discussion_log):
-            speaker = line.split(" (", 1)[0].strip() if " (" in line else "员工"
+            speaker = "员工"
+            speaker_title = ""
+            match = re.match(r"^(?P<name>.+?)[(（](?P<title>.+?)[)）]\s*(said:|表示：)", line)
+            if match:
+                speaker = match.group("name").strip()
+                speaker_title = match.group("title").strip()
+            elif " (" in line:
+                speaker = line.split(" (", 1)[0].strip()
             history.append(
                 {
                     "turn_id": f"discussion_{review.department.value}_{review_index}_{index}",
@@ -76,6 +103,7 @@ def _build_employee_discussion_history(project, agent: str) -> list[dict]:
                     "can_promote_to_intervention": False,
                     "source": "employee_statement",
                     "speaker": speaker,
+                    "speaker_title": speaker_title,
                 }
             )
     return history
@@ -122,8 +150,9 @@ def generate_plan():
         project.touch()
         project_store.save_project(project)
 
-        plan = orchestrator.build_plan_for_stage(project.idea, next_stage, project.interventions)
-        markdown = orchestrator.render_stage(plan, next_stage)
+        language = _project_language(project)
+        plan = orchestrator.build_plan_for_stage(project.idea, next_stage, project.interventions, language=language)
+        markdown = orchestrator.render_stage(plan, next_stage, language=language)
         version = project.register_stage_snapshot(plan, markdown, next_stage)
         project_store.save_project(project)
 
@@ -166,7 +195,6 @@ def add_intervention_and_regenerate():
 
     project_store = current_app.extensions["project_store"]
     task_store = current_app.extensions["task_store"]
-    orchestrator = current_app.extensions["planning_orchestrator"]
     project = project_store.get_project(project_id)
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
@@ -181,31 +209,58 @@ def add_intervention_and_regenerate():
     project.add_intervention(intervention)
     project_store.save_project(project)
 
-    task = TaskRecord.create(kind="regenerate_plan", project_id=project_id)
-    task.mark_running()
+    task = TaskRecord.create(kind="record_intervention", project_id=project_id)
+    task.mark_completed({"project_id": project_id, "auto_regenerated": False})
     task_store.save_task(task)
 
-    try:
-        plan = orchestrator.build_plan(project.idea, project.interventions)
-        markdown = orchestrator.render_plan(plan)
-        version = project.register_plan(plan, markdown)
-        project_store.save_project(project)
-        task.mark_completed({"project_id": project_id, "version_id": version.version_id})
-        task_store.save_task(task)
-        return jsonify(
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "task": task.to_dict(),
+                "project": project.to_dict(),
+                "auto_regenerated": False,
+            },
+        }
+    )
+
+
+@planning_bp.route("/api/projects/<project_id>/chat/employees", methods=["GET"])
+def get_chat_employees(project_id: str):
+    agent = request.args.get("agent", "research")
+
+    project_store = current_app.extensions["project_store"]
+    project = project_store.get_project(project_id)
+    if project is None:
+        return jsonify({"success": False, "error": "project not found"}), 404
+
+    if agent not in DEPARTMENT_AGENT_KEYS:
+        return jsonify({"success": True, "data": {"agent": agent, "employees": []}})
+
+    department = Department(agent)
+    team = department_teams().get(department, ())
+    employees = []
+    for member in team:
+        first_name = member.name.split(" ", 1)[0]
+        employees.append(
             {
-                "success": True,
-                "data": {
-                    "task": task.to_dict(),
-                    "project": project.to_dict(),
-                    "latest_plan": version.to_dict(),
-                },
+                "employee_id": member.employee_id,
+                "name": member.name,
+                "title": member.title,
+                "mention_key": first_name,
+                "department": member.department.value,
             }
         )
-    except Exception as exc:
-        task.mark_failed(str(exc))
-        task_store.save_task(task)
-        return jsonify({"success": False, "error": str(exc), "task": task.to_dict()}), 500
+
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "agent": agent,
+                "employees": employees,
+            },
+        }
+    )
 
 
 @planning_bp.route("/api/tasks/<task_id>", methods=["GET"])
@@ -337,6 +392,7 @@ def get_project_chat(project_id: str):
             "success": True,
             "data": {
                 "agent": agent,
+                "language": project.conversation_language,
                 "history": combined_history,
             },
         }
@@ -357,13 +413,23 @@ def post_project_chat(project_id: str):
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
 
-    reply, used_llm, suggested_stage, suggested_impact, can_promote, responder = chat_agent.reply(project, agent, message)
+    language = _normalize_conversation_language(payload.get("language"), fallback=project.conversation_language)
+    if project.conversation_language != language:
+        project.conversation_language = language
+
+    reply, used_llm, suggested_stage, suggested_impact, can_promote, responder = chat_agent.reply(
+        project,
+        agent,
+        message,
+        language=project.conversation_language,
+    )
     turn = project.append_conversation(
         agent=agent,
         user_message=message,
         assistant_message=reply,
         responder=responder,
         used_llm=used_llm,
+        language=project.conversation_language,
         suggested_stage=suggested_stage,
         suggested_impact=suggested_impact,
         can_promote_to_intervention=can_promote,
@@ -390,6 +456,7 @@ def post_project_chat(project_id: str):
             "success": True,
             "data": {
                 "agent": agent,
+                "language": project.conversation_language,
                 "turn": {**turn.to_dict(), "source": "chat", "speaker": turn.responder or agent},
                 "history": combined_history,
             },
@@ -405,8 +472,6 @@ def promote_chat_to_intervention(project_id: str):
         return jsonify({"success": False, "error": "turn_id is required"}), 400
 
     project_store = current_app.extensions["project_store"]
-    task_store = current_app.extensions["task_store"]
-    orchestrator = current_app.extensions["planning_orchestrator"]
     project = project_store.get_project(project_id)
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
@@ -427,28 +492,17 @@ def promote_chat_to_intervention(project_id: str):
     project_store.save_project(project)
 
     task = TaskRecord.create(kind="promote_chat_to_intervention", project_id=project_id)
-    task.mark_running()
-    task_store.save_task(task)
+    task.mark_completed({"project_id": project_id, "turn_id": turn.turn_id, "auto_regenerated": False})
+    current_app.extensions["task_store"].save_task(task)
 
-    try:
-        plan = orchestrator.build_plan(project.idea, project.interventions)
-        markdown = orchestrator.render_plan(plan)
-        version = project.register_plan(plan, markdown)
-        project_store.save_project(project)
-        task.mark_completed({"project_id": project_id, "version_id": version.version_id, "turn_id": turn.turn_id})
-        task_store.save_task(task)
-        return jsonify(
-            {
-                "success": True,
-                "data": {
-                    "task": task.to_dict(),
-                    "project": project.to_dict(),
-                    "latest_plan": version.to_dict(),
-                    "promoted_turn": turn.to_dict(),
-                },
-            }
-        )
-    except Exception as exc:
-        task.mark_failed(str(exc))
-        task_store.save_task(task)
-        return jsonify({"success": False, "error": str(exc), "task": task.to_dict()}), 500
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "task": task.to_dict(),
+                "project": project.to_dict(),
+                "promoted_turn": turn.to_dict(),
+                "auto_regenerated": False,
+            },
+        }
+    )

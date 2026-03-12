@@ -120,6 +120,7 @@ class ConversationTurn:
     user_message: str
     assistant_message: str
     created_at: str
+    language: str = "zh-CN"
     used_llm: bool = False
     suggested_stage: str = Stage.RESEARCH.value
     suggested_impact: str = "revise downstream conclusions"
@@ -137,6 +138,7 @@ class ConversationTurn:
             user_message=data["user_message"],
             assistant_message=data["assistant_message"],
             created_at=data["created_at"],
+            language=str(data.get("language", "zh-CN")),
             used_llm=bool(data.get("used_llm", False)),
             suggested_stage=data.get("suggested_stage", Stage.RESEARCH.value),
             suggested_impact=data.get("suggested_impact", "revise downstream conclusions"),
@@ -195,6 +197,7 @@ class ProjectRecord:
     current_stage: Stage
     created_at: str
     updated_at: str
+    conversation_language: str = "zh-CN"
     interventions: list[UserIntervention] = field(default_factory=list)
     plans: list[PlanVersion] = field(default_factory=list)
     latest_plan: ProjectPlan | None = None
@@ -276,6 +279,7 @@ class ProjectRecord:
         assistant_message: str,
         responder: str | None,
         used_llm: bool,
+        language: str,
         suggested_stage: str,
         suggested_impact: str,
         can_promote_to_intervention: bool = True,
@@ -287,6 +291,7 @@ class ProjectRecord:
             user_message=user_message,
             assistant_message=assistant_message,
             created_at=utc_now(),
+            language=language,
             used_llm=used_llm,
             suggested_stage=suggested_stage,
             suggested_impact=suggested_impact,
@@ -336,6 +341,7 @@ class ProjectRecord:
                 "type": "project_created",
                 "title": "Project created",
                 "detail": self.name,
+                "stage": Stage.INTAKE.value,
             }
         ]
         for index, version in enumerate(self.plans, start=1):
@@ -346,6 +352,8 @@ class ProjectRecord:
                     "title": f"Plan version {index}",
                     "detail": version.summary,
                     "version_id": version.version_id,
+                    "version_index": index,
+                    "stage": version.stage.value,
                 }
             )
         for intervention in self.interventions:
@@ -355,6 +363,8 @@ class ProjectRecord:
                     "type": "intervention",
                     "title": f"Intervention at {intervention.stage.value}",
                     "detail": f"{intervention.speaker}: {intervention.message}",
+                    "stage": intervention.stage.value,
+                    "speaker": intervention.speaker,
                 }
             )
         for agent, turns in self.conversations.items():
@@ -366,6 +376,7 @@ class ProjectRecord:
                         "title": f"Chat with {agent}",
                         "detail": turn.user_message,
                         "turn_id": turn.turn_id,
+                        "agent": agent,
                     }
                 )
         events.sort(key=lambda item: item["timestamp"])
@@ -380,6 +391,7 @@ class ProjectRecord:
             "current_stage": self.current_stage.value,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "conversation_language": self.conversation_language,
             "interventions": [asdict(item) for item in self.interventions],
             "plans": [item.to_dict() for item in self.plans],
             "latest_plan": serialize_project_plan(self.latest_plan) if self.latest_plan else None,
@@ -405,6 +417,7 @@ class ProjectRecord:
             current_stage=Stage(data["current_stage"]),
             created_at=data["created_at"],
             updated_at=data["updated_at"],
+            conversation_language=str(data.get("conversation_language", "zh-CN")),
             interventions=[UserIntervention(stage=Stage(item["stage"]), speaker=item["speaker"], message=item["message"], impact=item["impact"]) for item in data.get("interventions", [])],
             plans=[PlanVersion.from_dict(item) for item in data.get("plans", [])],
             latest_plan=latest_plan,

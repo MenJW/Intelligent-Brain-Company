@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='console.css') }}">
   </head>
   <body>
+    <button id="language-toggle" class="language-floating" disabled>语言: 中文</button>
     <div class="page-shell">
       <aside class="sidebar panel">
         <div class="panel-header">
@@ -117,7 +118,7 @@
               <span>预期影响</span>
               <textarea name="impact" rows="3" placeholder="例如：降低复杂度并缩短打样周期"></textarea>
             </label>
-            <button type="submit" class="primary-button" disabled id="submit-intervention">提交并重算</button>
+            <button type="submit" class="primary-button" disabled id="submit-intervention">提交干预</button>
           </form>
 
           <div class="section-head chat-head">
@@ -140,12 +141,16 @@
             <button id="refresh-chat" class="ghost-button" disabled>刷新</button>
           </div>
           <div id="chat-history" class="chat-history"></div>
-          <div id="chat-status" class="chat-status">聊天内容可以直接提升为正式干预并触发重算。</div>
+          <div id="chat-status" class="chat-status">聊天内容可以提升为正式干预，再用“执行下一环节”逐步重算。</div>
           <form id="chat-form" class="stack compact">
             <label>
               <span>发送给当前角色</span>
               <textarea id="chat-message" rows="3" placeholder="例如：研究组请重新评估目标用户的购买频率"></textarea>
             </label>
+            <div class="employee-picker-tools">
+              <button type="button" id="employee-picker-toggle" class="ghost-button" disabled>选择员工 @</button>
+            </div>
+            <div id="employee-picker-panel" class="employee-picker-panel hidden"></div>
             <button type="submit" class="primary-button" disabled id="send-chat">发送消息</button>
           </form>
         </section>
