@@ -321,7 +321,7 @@ def get_project_chat(project_id: str):
         {
             **turn.to_dict(),
             "source": "chat",
-            "speaker": agent,
+            "speaker": turn.responder or agent,
         }
         for turn in project.get_conversation(agent)
     ]
@@ -357,11 +357,12 @@ def post_project_chat(project_id: str):
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
 
-    reply, used_llm, suggested_stage, suggested_impact, can_promote = chat_agent.reply(project, agent, message)
+    reply, used_llm, suggested_stage, suggested_impact, can_promote, responder = chat_agent.reply(project, agent, message)
     turn = project.append_conversation(
         agent=agent,
         user_message=message,
         assistant_message=reply,
+        responder=responder,
         used_llm=used_llm,
         suggested_stage=suggested_stage,
         suggested_impact=suggested_impact,
@@ -373,7 +374,7 @@ def post_project_chat(project_id: str):
         {
             **item.to_dict(),
             "source": "chat",
-            "speaker": agent,
+            "speaker": item.responder or agent,
         }
         for item in project.get_conversation(agent)
     ]
@@ -389,7 +390,7 @@ def post_project_chat(project_id: str):
             "success": True,
             "data": {
                 "agent": agent,
-                "turn": {**turn.to_dict(), "source": "chat", "speaker": agent},
+                "turn": {**turn.to_dict(), "source": "chat", "speaker": turn.responder or agent},
                 "history": combined_history,
             },
         }
@@ -418,7 +419,7 @@ def promote_chat_to_intervention(project_id: str):
 
     intervention = UserIntervention(
         stage=Stage(payload.get("stage", turn.suggested_stage)),
-        speaker=payload.get("speaker", turn.agent),
+        speaker=payload.get("speaker", turn.responder or turn.agent),
         message=turn.user_message,
         impact=payload.get("impact", turn.suggested_impact),
     )

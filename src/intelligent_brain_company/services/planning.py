@@ -29,6 +29,7 @@ class PlanningOrchestrator:
             research_agent=ResearchAgent(llm_client=llm_client),
             board_agent=BoardAgent(llm_client=llm_client),
             department_agents=department_agents,
+            llm_client=llm_client,
         )
 
     def build_plan(

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from intelligent_brain_company.agents.contracts import department_contract_prompt, parse_department_solutions
-from intelligent_brain_company.agents.registry import AgentProfile
+from intelligent_brain_company.agents.registry import AgentProfile, department_teams
 from intelligent_brain_company.domain.models import (
     BoardDecision,
     Department,
@@ -43,6 +44,57 @@ def _suggested_stage_for_agent(agent_key: str) -> str:
         "board": Stage.BOARD.value,
     }
     return mapping.get(agent_key, Stage.RESEARCH.value)
+
+
+def _department_for_agent(agent_key: str) -> Department | None:
+    if agent_key == Department.RESEARCH.value:
+        return Department.RESEARCH
+    try:
+        return Department(agent_key)
+    except ValueError:
+        return None
+
+
+def _normalize_identity(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _extract_employee_mention(message: str) -> str | None:
+    match = re.search(r"@([A-Za-z0-9_\-\.]+)", message)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _resolve_employee(agent_key: str, message: str) -> tuple[AgentProfile | None, str]:
+    mention = _extract_employee_mention(message)
+    if not mention:
+        return None, message.strip()
+
+    department = _department_for_agent(agent_key)
+    if department is None:
+        return None, message.strip()
+
+    teams = department_teams()
+    members = teams.get(department, ())
+    if not members:
+        return None, message.strip()
+
+    mention_key = _normalize_identity(mention)
+    matched: AgentProfile | None = None
+    for member in members:
+        first_name = member.name.split(" ", 1)[0]
+        identities = (
+            _normalize_identity(member.employee_id),
+            _normalize_identity(member.name),
+            _normalize_identity(first_name),
+        )
+        if mention_key in identities:
+            matched = member
+            break
+
+    cleaned = re.sub(r"@([A-Za-z0-9_\-\.]+)", "", message, count=1).strip()
+    return matched, cleaned or message.strip()
 
 
 @dataclass(slots=True)
@@ -178,10 +230,14 @@ class DepartmentAgent:
 class ChatAgent:
     llm_client: LLMClient | None = None
 
-    def reply(self, project: ProjectRecord, agent_key: str, message: str) -> tuple[str, bool, str, str, bool]:
+    def reply(self, project: ProjectRecord, agent_key: str, message: str) -> tuple[str, bool, str, str, bool, str | None]:
+        employee, cleaned_message = _resolve_employee(agent_key, message)
+        if employee is not None:
+            return self._reply_as_employee(project, agent_key, employee, cleaned_message)
+
         fallback = self._fallback_reply(project, agent_key, message)
         if self.llm_client is None:
-            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True, None
 
         system_prompt = (
             "You are an internal expert inside an AI-native company. "
@@ -200,7 +256,7 @@ class ChatAgent:
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt, temperature=0.4)
         if not data:
-            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True, None
         try:
             reply = str(data["reply"])
             follow_ups = [str(item) for item in data.get("follow_up_questions", [])]
@@ -214,9 +270,69 @@ class ChatAgent:
             suggested_impact = str(data.get("suggested_impact", "revise downstream conclusions"))
             can_promote = bool(data.get("can_promote_to_intervention", True))
             response_text = reply + ("\n\n" + "\n".join(suffix) if suffix else "")
-            return (response_text, True, suggested_stage, suggested_impact, can_promote)
+            return (response_text, True, suggested_stage, suggested_impact, can_promote, None)
         except (KeyError, TypeError, ValueError):
-            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True, None
+
+    def _reply_as_employee(
+        self,
+        project: ProjectRecord,
+        agent_key: str,
+        employee: AgentProfile,
+        message: str,
+    ) -> tuple[str, bool, str, str, bool, str | None]:
+        fallback = self._fallback_employee_reply(project, employee, message)
+        default_stage = _suggested_stage_for_agent(agent_key)
+        default_impact = (
+            f"采纳 {employee.name}({employee.employee_id}) 的建议，"
+            f"更新 {employee.department.value} 方案的 {employee.capability_focus[0]} 假设"
+        )
+        if self.llm_client is None:
+            return fallback, False, default_stage, default_impact, True, employee.name
+
+        system_prompt = (
+            "You are a specific employee replying inside an AI-native company roundtable. "
+            "Return strict JSON with keys: reply, suggested_stage, suggested_impact, can_promote_to_intervention. "
+            "Be concrete and role-consistent."
+        )
+        user_prompt = (
+            f"Employee ID: {employee.employee_id}\n"
+            f"Employee name: {employee.name}\n"
+            f"Employee title: {employee.title}\n"
+            f"Employee department: {employee.department.value}\n"
+            f"Employee personality: {employee.personality}\n"
+            f"Employee focus: {', '.join(employee.capability_focus)}\n"
+            f"Project: {project.name}\n"
+            f"Idea: {project.idea.title}\n"
+            f"Idea summary: {project.idea.summary or 'N/A'}\n"
+            f"Constraints: {', '.join(project.idea.user_constraints) or 'N/A'}\n"
+            f"Latest selected solutions:\n{_department_context(project.latest_plan.selected_solutions if project.latest_plan else None)}\n"
+            f"User message to this employee: {message}"
+        )
+        data = self.llm_client.generate_json(system_prompt, user_prompt, temperature=0.45)
+        if not data:
+            return fallback, False, default_stage, default_impact, True, employee.name
+
+        try:
+            reply = str(data["reply"])
+            suggested_stage = str(data.get("suggested_stage", default_stage))
+            suggested_impact = str(data.get("suggested_impact", default_impact))
+            can_promote = bool(data.get("can_promote_to_intervention", True))
+            return reply, True, suggested_stage, suggested_impact, can_promote, employee.name
+        except (KeyError, TypeError, ValueError):
+            return fallback, False, default_stage, default_impact, True, employee.name
+
+    def _fallback_employee_reply(self, project: ProjectRecord, employee: AgentProfile, message: str) -> str:
+        focus = employee.capability_focus[0] if employee.capability_focus else "execution quality"
+        context = ""
+        if project.latest_plan and employee.department in project.latest_plan.selected_solutions:
+            solution = project.latest_plan.selected_solutions[employee.department]
+            context = f"当前该部门主推方案是 {solution.name}，摘要：{solution.summary}。"
+        return (
+            f"{employee.name}（{employee.title}）回复：基于我的职责，我会优先关注 {focus}。"
+            f"{context}"
+            f"针对你的问题“{message}”，建议先给出可执行的验证步骤和验收标准。"
+        )
 
     def _default_impact(self, agent_key: str) -> str:
         if agent_key == "board":

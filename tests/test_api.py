@@ -201,6 +201,35 @@ def test_chat_turn_can_be_promoted_to_intervention_and_regenerated(tmp_path: Pat
     assert len(project["plans"]) == 2
 
 
+def test_chat_supports_at_employee_reply_and_promotion_independence(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Employee Mention Flow"}).get_json()["data"]
+    project_id = created["project_id"]
+    client.post("/api/planning/generate", json={"project_id": project_id})
+    client.post("/api/planning/generate", json={"project_id": project_id})
+
+    chat = client.post(
+        f"/api/projects/{project_id}/chat",
+        json={"agent": "hardware", "message": "@Noah 请给一个传感器集成风险控制建议"},
+    )
+    assert chat.status_code == 200
+    payload = chat.get_json()["data"]
+    assert payload["turn"]["speaker"] == "Noah Bennett"
+    assert "Noah Bennett" in payload["turn"]["assistant_message"]
+
+    turn_id = payload["turn"]["turn_id"]
+    promoted = client.post(
+        f"/api/projects/{project_id}/chat/promote",
+        json={"turn_id": turn_id},
+    )
+    assert promoted.status_code == 200
+    project = promoted.get_json()["data"]["project"]
+    assert project["interventions"]
+    assert project["interventions"][-1]["speaker"] == "Noah Bennett"
+
+
 def test_sqlite_database_is_used_for_persistence(tmp_path: Path) -> None:
     app = make_test_app(tmp_path)
     client = app.test_client()

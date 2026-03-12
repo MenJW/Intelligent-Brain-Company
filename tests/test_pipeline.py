@@ -3,6 +3,20 @@ from intelligent_brain_company.services.planning import PlanningOrchestrator
 from intelligent_brain_company.workflows.pipeline import DEPARTMENT_DEPENDENCIES
 
 
+class _RoundtableLLMStub:
+    def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2):
+        marker = "Employee name: "
+        if marker not in user_prompt:
+            return None
+        name = user_prompt.split(marker, 1)[1].split("\n", 1)[0].strip()
+        return {"statement": f"{name} proposes a unique dependency mitigation checklist."}
+
+
+class _RoundtableLLMNoneStub:
+    def generate_json(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.2):
+        return None
+
+
 def test_pipeline_generates_selected_solution_for_each_department() -> None:
     orchestrator = PlanningOrchestrator()
     plan = orchestrator.build_plan(
@@ -56,3 +70,26 @@ def test_roundtable_logs_include_all_relevant_employees() -> None:
             )
         )
         assert len(review.discussion_log) == len(review.participant_profiles)
+
+
+def test_roundtable_logs_use_llm_per_employee_when_available() -> None:
+    orchestrator = PlanningOrchestrator()
+    orchestrator.pipeline.llm_client = _RoundtableLLMStub()
+    plan = orchestrator.build_plan(IdeaBrief(title="LLM Roundtable Voice"))
+
+    for review in plan.roundtable_reviews:
+        assert review.discussion_log
+        for line in review.discussion_log:
+            assert "said:" in line
+            assert "unique dependency mitigation checklist" in line
+
+
+def test_roundtable_logs_fallback_when_llm_unavailable() -> None:
+    orchestrator = PlanningOrchestrator()
+    orchestrator.pipeline.llm_client = _RoundtableLLMNoneStub()
+    plan = orchestrator.build_plan(IdeaBrief(title="Fallback Roundtable Voice"))
+
+    for review in plan.roundtable_reviews:
+        assert review.discussion_log
+        for line in review.discussion_log:
+            assert "raised" in line

@@ -17,6 +17,7 @@ from intelligent_brain_company.domain.models import (
     Stage,
     UserIntervention,
 )
+from intelligent_brain_company.services.llm_client import LLMClient
 
 
 DEPARTMENT_DEPENDENCIES: dict[Department, list[Department]] = {
@@ -49,10 +50,12 @@ class CompanyPipeline:
         research_agent: ResearchAgent | None = None,
         board_agent: BoardAgent | None = None,
         department_agents: dict[Department, DepartmentAgent] | None = None,
+        llm_client: LLMClient | None = None,
     ) -> None:
         self.research_agent = research_agent or ResearchAgent()
         self.board_agent = board_agent or BoardAgent()
         self.department_agents = department_agents or {}
+        self.llm_client = llm_client
 
     def run(
         self,
@@ -615,13 +618,61 @@ class CompanyPipeline:
             return lines
         focus_area = solution.success_metrics[0] if solution.success_metrics else "delivery reliability"
         for member in participants:
-            focus_list = [str(item) for item in member.get("capability_focus", [])]
-            primary_focus = focus_list[0] if focus_list else "cross-functional risk checks"
-            lines.append(
-                f"{member.get('name')} ({member.get('title')}) raised {primary_focus} implications for "
-                f"{solution.name} and asked the team to preserve {focus_area}."
-            )
+            generated = self._build_roundtable_line_with_llm(solution, member, focus_area)
+            if generated:
+                lines.append(generated)
+                continue
+            lines.append(self._build_roundtable_line_fallback(solution, member, focus_area))
         return lines
+
+    def _build_roundtable_line_with_llm(
+        self,
+        solution: DepartmentSolution,
+        member: dict[str, object],
+        focus_area: str,
+    ) -> str | None:
+        if self.llm_client is None:
+            return None
+
+        system_prompt = (
+            "You are a single employee in a cross-functional roundtable. "
+            "Return strict JSON with key: statement. "
+            "Write exactly one concise statement in English, practical and specific."
+        )
+        user_prompt = (
+            f"Employee name: {member.get('name')}\n"
+            f"Employee title: {member.get('title')}\n"
+            f"Employee department: {member.get('department')}\n"
+            f"Employee personality: {member.get('personality')}\n"
+            f"Employee focus areas: {', '.join(str(item) for item in member.get('capability_focus', []))}\n"
+            f"Solution department: {solution.department.value}\n"
+            f"Solution name: {solution.name}\n"
+            f"Solution summary: {solution.summary}\n"
+            f"Solution dependencies: {', '.join(item.value for item in solution.dependencies) or 'none'}\n"
+            f"Roundtable focus to preserve: {focus_area}\n"
+            "The statement should reflect this employee's personality and role, include one concrete concern "
+            "or recommendation, and reference the solution context."
+        )
+        data = self.llm_client.generate_json(system_prompt, user_prompt, temperature=0.5)
+        if not data:
+            return None
+        text = str(data.get("statement", "")).strip()
+        if not text:
+            return None
+        return f"{member.get('name')} ({member.get('title')}) said: {text}"
+
+    def _build_roundtable_line_fallback(
+        self,
+        solution: DepartmentSolution,
+        member: dict[str, object],
+        focus_area: str,
+    ) -> str:
+        focus_list = [str(item) for item in member.get("capability_focus", [])]
+        primary_focus = focus_list[0] if focus_list else "cross-functional risk checks"
+        return (
+            f"{member.get('name')} ({member.get('title')}) raised {primary_focus} implications for "
+            f"{solution.name} and asked the team to preserve {focus_area}."
+        )
 
     def _select_solutions(
         self,

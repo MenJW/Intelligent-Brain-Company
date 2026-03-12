@@ -116,6 +116,7 @@ class TaskStatus(str, Enum):
 class ConversationTurn:
     turn_id: str
     agent: str
+    responder: str | None
     user_message: str
     assistant_message: str
     created_at: str
@@ -132,6 +133,7 @@ class ConversationTurn:
         return cls(
             turn_id=data.get("turn_id", f"turn_{uuid4().hex[:12]}"),
             agent=data["agent"],
+            responder=data.get("responder"),
             user_message=data["user_message"],
             assistant_message=data["assistant_message"],
             created_at=data["created_at"],
@@ -272,6 +274,7 @@ class ProjectRecord:
         agent: str,
         user_message: str,
         assistant_message: str,
+        responder: str | None,
         used_llm: bool,
         suggested_stage: str,
         suggested_impact: str,
@@ -280,6 +283,7 @@ class ProjectRecord:
         turn = ConversationTurn(
             turn_id=f"turn_{uuid4().hex[:12]}",
             agent=agent,
+            responder=responder,
             user_message=user_message,
             assistant_message=assistant_message,
             created_at=utc_now(),

@@ -68,6 +68,10 @@ function profileByTurn(agent, turn) {
   if (turn.source === 'stage_review') {
     return STAGE_REPLAY_PROFILE
   }
+  if (turn.source === 'chat' && turn.speaker && turn.speaker !== agent) {
+    const speaker = String(turn.speaker)
+    return { name: speaker, avatar: speaker.slice(0, 1), hue: 126 }
+  }
   if (turn.source === 'employee_statement') {
     const speaker = String(turn.speaker || '员工')
     return { name: speaker, avatar: speaker.slice(0, 1), hue: 94 }
