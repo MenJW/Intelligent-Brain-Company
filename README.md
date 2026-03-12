@@ -1,296 +1,207 @@
 # Intelligent Brain Company
 
-> An AI boardroom that pressure-tests startup ideas through research, department reviews, board debate, scorecards, and intervention-driven replanning.
+An AI boardroom for startup ideas.
 
-[中文版 / Chinese Version](./README.zh-CN.md)
+Turn one raw idea into a structured company decision flow:
 
----
+- research before optimism
+- department debate before commitment
+- board verdict before execution
+- intervention-driven replanning when assumptions change
 
-## Hero Demo
-
-> Replace the image link below with your product GIF or short demo video preview.
-
-![Hero GIF](./assets/hero-demo.gif)
-
-**Give it a startup idea.**  
-It acts like an AI company:
-- researches the market,
-- lets different departments review the idea,
-- sends it to a board-level decision,
-- scores the opportunity and risks,
-- and replans the strategy when needed.
-
-Instead of getting a single AI opinion, you get a **structured company-style review process**.
+[中文文档](./README.zh-CN.md)
 
 ---
 
-## Why this exists
+## Why it feels different
 
-Most startup ideas do not fail because people cannot build fast.  
-They fail because teams spend weeks or months building something that should have been challenged earlier.
+Most AI tools give you one polished answer.
 
-Intelligent Brain Company is built to simulate that challenge early:
+Intelligent Brain Company gives you a process:
 
-- **Research before excitement**
-- **Debate before commitment**
-- **Scorecards before optimism**
-- **Intervention before wasted execution**
+1. Research
+2. Department plans
+3. Cross-department roundtable
+4. Synthesis
+5. Board decision with scorecard
 
-The goal is simple:
-
-**stress-test an idea before you waste time building the wrong thing.**
+You can chat with agents at any stage and promote important chat turns into formal interventions.
 
 ---
 
-## What makes this different from a normal AI chatbot?
+## Product Snapshot
 
-A normal chatbot usually gives you a smart answer.
+![Hero Demo](./assets/hero-demo.gif)
 
-This project tries to give you a **decision process**.
+### What is available now
 
-### Instead of:
-- one prompt
-- one response
-- one vague recommendation
+- Web Console at root path
+- Flask API for project, planning, timeline, diff, and chat
+- CLI for quick local planning drafts
+- Persistent project/task state with SQLite
+- Chinese and English conversation modes
+- Stage history replay and employee-level roundtable logs
 
-### You get:
-- research and framing
-- multiple department perspectives
-- board-style review
-- structured scorecards
-- intervention triggers
-- replanning / pivot suggestions
+### Designed for
 
-This makes the system feel less like “ask AI for advice” and more like:
-
-**“run your idea through an AI company.”**
+- founders pressure-testing early ideas
+- product teams evaluating strategic bets
+- accelerators and startup programs
+- builders who want structured pushback, not generic encouragement
 
 ---
 
-## How it works
+## Quick Start
 
-The exact implementation may evolve, but the product logic looks like this:
+### 1. Install
 
-1. **Idea intake**  
-   A startup idea is submitted to the system.
+```bash
+python -m pip install -e .[dev]
+```
 
-2. **Research phase**  
-   The system gathers context around market, competition, feasibility, risks, and opportunity.
+### 2. Run API + Console
 
-3. **Department review**  
-   Different AI roles or departments analyze the idea from their own perspective.
+```bash
+ibc-api
+```
 
-   Examples:
-   - Market / Research
-   - Product
-   - Finance
-   - Growth / GTM
-   - Strategy
-   - Risk / Red Team
+Open:
 
-4. **Board review**  
-   The system escalates the idea into a higher-level decision process.
+- http://127.0.0.1:8000
+- http://127.0.0.1:8000/health
 
-5. **Scorecards**  
-   The idea is scored across dimensions such as:
-   - market attractiveness
-   - execution difficulty
-   - defensibility
-   - monetization
-   - timing
-   - risk
+### 3. Run CLI
 
-6. **Intervention-driven replanning**  
-   If major weaknesses are found, the system proposes how to rework, narrow, reposition, or pivot the idea.
+```bash
+ibc-plan "AI copilot for independent gyms" \
+  --summary "Help gym owners automate retention and upsell workflows." \
+  --constraint "Keep CAC under control" \
+  --metric "Monthly retention > 90%"
+```
 
 ---
 
-## Example flow
+## API in 60 Seconds
 
-**Input idea:**  
-> “An AI cofounder for first-time solo founders.”
+### Create a project
 
-Possible outputs:
-- market concerns
-- execution risks
-- target customer confusion
-- pricing weakness
-- GTM problems
-- revised positioning recommendation
-- go / no-go / pivot-style board outcome
+```bash
+curl -X POST http://127.0.0.1:8000/api/projects \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "AI interviewer for junior candidates",
+    "summary": "Automated pre-screening with role-specific rubrics.",
+    "constraints": ["Avoid biased scoring"],
+    "metrics": ["Interview completion rate > 70%"],
+    "language": "en-US"
+  }'
+```
 
-This is not about generating hype.  
-It is about generating **useful pressure**.
+### Run next stage
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/planning/generate \
+  -H "Content-Type: application/json" \
+  -d '{"project_id":"<PROJECT_ID>"}'
+```
+
+Call generate repeatedly to move through stages.
+
+### Chat with an agent
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/projects/<PROJECT_ID>/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"research", "message":"What is the biggest go-to-market risk?"}'
+```
+
+### Compare two plan versions
+
+```bash
+curl "http://127.0.0.1:8000/api/projects/<PROJECT_ID>/plans/diff?from=<V1>&to=<V2>"
+```
+
+---
+
+## Stage Flow
+
+1. `research`
+2. `department_design`
+3. `roundtable`
+4. `synthesis`
+5. `board`
+
+The scorecard and recommendation are produced at the board stage.
 
 ---
 
 ## Screenshots
 
-> Replace the placeholders below with real screenshots from your app.
-
-### 1. Idea input and workflow start
 ![Screenshot 1](./assets/screenshot-1.png)
-
-### 2. Department review / multi-agent analysis
 ![Screenshot 2](./assets/screenshot-2.png)
-
-### 3. Board verdict, scorecard, and replanning output
 ![Screenshot 3](./assets/screenshot-3.png)
 
 ---
 
-## Core concepts
+## Configuration
 
-### Research
-Before judging an idea, the system should build context.
+Optional environment variables:
 
-### Departments
-Different internal “departments” challenge the idea from multiple angles instead of collapsing everything into one answer.
+- `IBC_HOST` default `127.0.0.1`
+- `IBC_PORT` default `8000`
+- `IBC_DATA_DIR` default `.data`
+- `IBC_LLM_API_KEY`
+- `IBC_LLM_BASE_URL`
+- `IBC_LLM_MODEL`
+- `IBC_LLM_TIMEOUT_SECONDS` default `45`
 
-### Board review
-A final decision layer creates a stronger sense of governance and prioritization.
-
-### Scorecards
-Structured scoring makes output easier to compare, critique, and improve.
-
-### Intervention-driven replanning
-The system should not only reject weak ideas — it should also help reshape them.
+Without LLM config, the app still runs in deterministic demo mode.
 
 ---
 
-## Who this is for
+## Deploy
 
-This project may be useful for:
+This repo includes Render deployment support:
 
-- founders testing early startup ideas
-- indie hackers exploring new products
-- product teams evaluating opportunities
-- accelerators or startup programs
-- investors doing lightweight first-pass screening
-- anyone who wants a more adversarial, structured idea review process
+- `render.yaml`
+- WSGI entrypoint at `src/intelligent_brain_company/wsgi.py`
+
+See detailed notes in `docs/deployment.md`.
 
 ---
 
-## Use cases
+## Docs
 
-- **Should I build this?**
-- **What are the biggest risks in this idea?**
-- **What would a skeptical board say?**
-- **Where is the business model weak?**
-- **How should this idea pivot?**
-- **What would make this more fundable or viable?**
-
----
-
-## Why it is interesting
-
-This project sits at the intersection of:
-
-- AI agents
-- startup evaluation
-- structured decision systems
-- simulation of company processes
-- human-like governance workflows
-
-It is not just trying to answer questions.  
-It is trying to simulate an **organizational thinking process**.
-
----
-
-## Architecture
-
-> You can expand this section later with real implementation details.
-
-Suggested areas to document:
-- orchestration flow
-- agent / role design
-- model usage
-- state management
-- scoring logic
-- replanning triggers
-- output generation
-
-### Example architecture outline
-- Frontend: UI for idea submission and review visualization
-- Backend: orchestration engine for multi-step evaluation
-- LLM layer: agent / department reasoning
-- Evaluation layer: scorecards and board decision logic
-- Replanning layer: interventions and pivot suggestions
-
----
-
-## Local development
-
-> Replace this section with your actual setup instructions.
-
-### Requirements
-- Python
-- Node.js / npm
-- Any required API keys or environment variables
-
-### Example setup
-```bash
-git clone https://github.com/MenJW/Intelligent-Brain-Company.git
-cd Intelligent-Brain-Company
-# install backend dependencies
-# install frontend dependencies
-# configure environment variables
-# run the app
-```
+- `docs/architecture.md`
+- `docs/agent-contracts.md`
+- `docs/evaluation-rubric.md`
+- `docs/execution-plan.md`
 
 ---
 
 ## Roadmap
 
-- [ ] Improve department specialization
-- [ ] Add stronger board debate dynamics
-- [ ] Add richer scorecard dimensions
-- [ ] Add scenario simulation for 6–12 month startup outcomes
-- [ ] Add downloadable board memo / investment memo
-- [ ] Add better visual reporting
-- [ ] Add public demo playground
-
----
-
-## Demo ideas to try
-
-If you want test cases that show the system well, try ideas like:
-
-- “AI tax assistant for creators”
-- “Vertical SaaS for independent gyms”
-- “AI product manager for solo founders”
-- “Marketplace for fractional startup operators”
-- “AI customer support copilot for Shopify brands”
-
-You can also try intentionally bad ideas to see how the system responds.
-
----
-
-## Philosophy
-
-Good startup ideas should survive pressure.
-
-This project is built around a simple belief:
-
-**before you build a company, your idea should survive a company.**
+- Stronger board debate mechanics
+- Checkpoint-aware selective recomputation
+- Multi-user auth and workspace isolation
+- Managed DB option for production
+- Automated quality regression evaluation
 
 ---
 
 ## Contributing
 
-Contributions, feedback, critiques, and experiments are welcome.
+Issues and pull requests are welcome.
 
-If you have ideas for:
-- better evaluation logic,
-- better department design,
-- better scorecards,
-- better simulation mechanics,
-- or better startup stress tests,
+If you want to contribute quickly, start with:
 
-feel free to open an issue or submit a pull request.
+- new domain test cases
+- better intervention heuristics
+- richer board scoring dimensions
+- UX improvements for plan diff and timeline views
 
 ---
 
 ## License
 
-> Add your license here.
+Apache-2.0
