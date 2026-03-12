@@ -47,6 +47,15 @@ class ProjectStore:
             connection.commit()
         return project
 
+    def delete_project(self, project_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM projects WHERE project_id = ?",
+                (project_id,),
+            )
+            connection.commit()
+        return cursor.rowcount > 0
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.config.database_path)
         connection.row_factory = sqlite3.Row

@@ -38,6 +38,14 @@ class PlanningOrchestrator:
     ) -> ProjectPlan:
         return self.pipeline.run(brief=brief, interventions=interventions)
 
+    def build_plan_for_stage(
+        self,
+        brief: IdeaBrief,
+        stage: Stage,
+        interventions: list[UserIntervention] | None = None,
+    ) -> ProjectPlan:
+        return self.pipeline.run_until(brief=brief, stage=stage, interventions=interventions)
+
     def render_plan(self, plan: ProjectPlan) -> str:
         return self.pipeline.render_markdown(plan)
 

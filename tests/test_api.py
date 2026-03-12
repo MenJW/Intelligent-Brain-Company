@@ -36,10 +36,37 @@ def test_create_project_and_generate_plan(tmp_path: Path) -> None:
     assert payload["executed_stage"] == "research"
     assert payload["project"]["current_stage"] == "research"
     assert payload["project"]["latest_plan_markdown"]
-    assert payload["project"]["latest_plan"]["scorecard"]["recommendation"] in {"Go", "Maybe", "No-Go"}
-    first_roundtable = payload["project"]["latest_plan"]["roundtable_reviews"][0]
-    assert first_roundtable["participant_profiles"]
-    assert first_roundtable["discussion_log"]
+    assert payload["project"]["latest_plan"]["scorecard"] is None
+    assert payload["project"]["latest_plan"]["roundtable_reviews"] == []
+
+
+def test_scorecard_is_generated_only_at_board_stage(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Stage Gate Validation"}).get_json()["data"]
+    project_id = created["project_id"]
+
+    research = client.post("/api/planning/generate", json={"project_id": project_id}).get_json()["data"]
+    assert research["executed_stage"] == "research"
+    assert research["project"]["latest_plan"]["scorecard"] is None
+
+    department = client.post("/api/planning/generate", json={"project_id": project_id}).get_json()["data"]
+    assert department["executed_stage"] == "department_design"
+    assert department["project"]["latest_plan"]["scorecard"] is None
+
+    roundtable = client.post("/api/planning/generate", json={"project_id": project_id}).get_json()["data"]
+    assert roundtable["executed_stage"] == "roundtable"
+    assert roundtable["project"]["latest_plan"]["scorecard"] is None
+    assert roundtable["project"]["latest_plan"]["roundtable_reviews"]
+
+    synthesis = client.post("/api/planning/generate", json={"project_id": project_id}).get_json()["data"]
+    assert synthesis["executed_stage"] == "synthesis"
+    assert synthesis["project"]["latest_plan"]["scorecard"] is None
+
+    board = client.post("/api/planning/generate", json={"project_id": project_id}).get_json()["data"]
+    assert board["executed_stage"] == "board"
+    assert board["project"]["latest_plan"]["scorecard"]["recommendation"] in {"Go", "Maybe", "No-Go"}
 
 
 def test_intervention_creates_new_plan_version(tmp_path: Path) -> None:
@@ -122,11 +149,32 @@ def test_chat_endpoint_persists_history(tmp_path: Path) -> None:
     assert chat.status_code == 200
     payload = chat.get_json()["data"]
     assert payload["history"]
-    assert payload["history"][0]["agent"] == "research"
+    chat_items = [item for item in payload["history"] if item.get("source") == "chat"]
+    assert chat_items
+    assert chat_items[0]["agent"] == "research"
 
     history = client.get(f"/api/projects/{project_id}/chat?agent=research")
     assert history.status_code == 200
-    assert len(history.get_json()["data"]["history"]) == 1
+    history_items = history.get_json()["data"]["history"]
+    assert any(item.get("source") == "chat" for item in history_items)
+    assert any(item.get("source") == "stage_review" for item in history_items)
+
+
+def test_chat_history_includes_stage_and_employee_replay(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Autonomous Store Cart"}).get_json()["data"]
+    project_id = created["project_id"]
+    client.post("/api/planning/generate", json={"project_id": project_id})
+    client.post("/api/planning/generate", json={"project_id": project_id})
+    client.post("/api/planning/generate", json={"project_id": project_id})
+
+    history = client.get(f"/api/projects/{project_id}/chat?agent=hardware")
+    assert history.status_code == 200
+    history_items = history.get_json()["data"]["history"]
+    assert any(item.get("source") == "stage_review" for item in history_items)
+    assert any(item.get("source") == "employee_statement" for item in history_items)
 
 
 def test_chat_turn_can_be_promoted_to_intervention_and_regenerated(tmp_path: Path) -> None:
@@ -165,3 +213,18 @@ def test_sqlite_database_is_used_for_persistence(tmp_path: Path) -> None:
     with sqlite3.connect(config.database_path) as connection:
         project_count = connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
         assert project_count >= 1
+
+
+def test_delete_project_endpoint_removes_project(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Delete Me"}).get_json()["data"]
+    project_id = created["project_id"]
+
+    deleted = client.delete(f"/api/projects/{project_id}")
+    assert deleted.status_code == 200
+    assert deleted.get_json()["data"]["project_id"] == project_id
+
+    missing = client.get(f"/api/projects/{project_id}")
+    assert missing.status_code == 404

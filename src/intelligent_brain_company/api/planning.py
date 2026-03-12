@@ -9,6 +9,78 @@ from intelligent_brain_company.domain.models import Stage, UserIntervention
 from intelligent_brain_company.domain.project_state import ProjectStatus, TaskRecord
 
 
+DEPARTMENT_AGENT_KEYS = {"hardware", "software", "design", "marketing", "finance"}
+
+
+def _visible_stages_for_agent(agent: str) -> set[Stage]:
+    if agent == "research":
+        return {Stage.RESEARCH}
+    if agent == "board":
+        return {Stage.SYNTHESIS, Stage.BOARD}
+    if agent in DEPARTMENT_AGENT_KEYS:
+        return {Stage.DEPARTMENT_DESIGN, Stage.ROUNDTABLE, Stage.SYNTHESIS}
+    return {Stage.RESEARCH, Stage.DEPARTMENT_DESIGN, Stage.ROUNDTABLE, Stage.SYNTHESIS, Stage.BOARD}
+
+
+def _build_stage_replay_history(project, agent: str) -> list[dict]:
+    visible_stages = _visible_stages_for_agent(agent)
+    history: list[dict] = []
+    for version in project.plans:
+        if version.stage not in visible_stages:
+            continue
+        history.append(
+            {
+                "turn_id": f"replay_{version.version_id}",
+                "agent": agent,
+                "user_message": "",
+                "assistant_message": version.markdown,
+                "created_at": version.created_at,
+                "used_llm": False,
+                "suggested_stage": version.stage.value,
+                "suggested_impact": "历史环节回看",
+                "can_promote_to_intervention": False,
+                "source": "stage_review",
+                "speaker": "阶段评审回放",
+            }
+        )
+    return history
+
+
+def _build_employee_discussion_history(project, agent: str) -> list[dict]:
+    if project.latest_plan is None:
+        return []
+
+    roundtable_timestamps = [
+        version.created_at
+        for version in project.plans
+        if version.stage == Stage.ROUNDTABLE
+    ]
+    fallback_timestamp = roundtable_timestamps[-1] if roundtable_timestamps else project.updated_at
+
+    history: list[dict] = []
+    for review_index, review in enumerate(project.latest_plan.roundtable_reviews):
+        if agent in DEPARTMENT_AGENT_KEYS and review.department.value != agent:
+            continue
+        for index, line in enumerate(review.discussion_log):
+            speaker = line.split(" (", 1)[0].strip() if " (" in line else "员工"
+            history.append(
+                {
+                    "turn_id": f"discussion_{review.department.value}_{review_index}_{index}",
+                    "agent": agent,
+                    "user_message": "",
+                    "assistant_message": line,
+                    "created_at": fallback_timestamp,
+                    "used_llm": False,
+                    "suggested_stage": Stage.ROUNDTABLE.value,
+                    "suggested_impact": "跨部门评审员工发言",
+                    "can_promote_to_intervention": False,
+                    "source": "employee_statement",
+                    "speaker": speaker,
+                }
+            )
+    return history
+
+
 @planning_bp.route("/api/planning/generate", methods=["POST"])
 def generate_plan():
     payload = request.get_json(silent=True) or {}
@@ -50,7 +122,7 @@ def generate_plan():
         project.touch()
         project_store.save_project(project)
 
-        plan = orchestrator.build_plan(project.idea, project.interventions)
+        plan = orchestrator.build_plan_for_stage(project.idea, next_stage, project.interventions)
         markdown = orchestrator.render_stage(plan, next_stage)
         version = project.register_stage_snapshot(plan, markdown, next_stage)
         project_store.save_project(project)
@@ -244,12 +316,28 @@ def get_project_chat(project_id: str):
     project = project_store.get_project(project_id)
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
+
+    manual_history = [
+        {
+            **turn.to_dict(),
+            "source": "chat",
+            "speaker": agent,
+        }
+        for turn in project.get_conversation(agent)
+    ]
+    stage_replay_history = _build_stage_replay_history(project, agent)
+    employee_discussions = _build_employee_discussion_history(project, agent)
+    combined_history = sorted(
+        [*stage_replay_history, *employee_discussions, *manual_history],
+        key=lambda item: item["created_at"],
+    )
+
     return jsonify(
         {
             "success": True,
             "data": {
                 "agent": agent,
-                "history": [turn.to_dict() for turn in project.get_conversation(agent)],
+                "history": combined_history,
             },
         }
     )
@@ -280,13 +368,29 @@ def post_project_chat(project_id: str):
         can_promote_to_intervention=can_promote,
     )
     project_store.save_project(project)
+
+    manual_history = [
+        {
+            **item.to_dict(),
+            "source": "chat",
+            "speaker": agent,
+        }
+        for item in project.get_conversation(agent)
+    ]
+    stage_replay_history = _build_stage_replay_history(project, agent)
+    employee_discussions = _build_employee_discussion_history(project, agent)
+    combined_history = sorted(
+        [*stage_replay_history, *employee_discussions, *manual_history],
+        key=lambda item: item["created_at"],
+    )
+
     return jsonify(
         {
             "success": True,
             "data": {
                 "agent": agent,
-                "turn": turn.to_dict(),
-                "history": [item.to_dict() for item in project.get_conversation(agent)],
+                "turn": {**turn.to_dict(), "source": "chat", "speaker": agent},
+                "history": combined_history,
             },
         }
     )

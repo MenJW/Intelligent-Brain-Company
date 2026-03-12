@@ -239,6 +239,31 @@ button:disabled {
   background: var(--panel-strong);
 }
 
+.project-card-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.project-card-row .project-card {
+  width: 100%;
+  text-align: left;
+}
+
+.project-delete-button {
+  width: auto;
+  align-self: stretch;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(246, 117, 117, 0.42);
+  color: #ffd9d9;
+  background: rgba(145, 41, 41, 0.45);
+}
+
+.project-delete-button:hover:not(:disabled) {
+  background: rgba(171, 44, 44, 0.55);
+}
+
 .hero-copy {
   max-width: 760px;
 }
@@ -409,7 +434,7 @@ button:disabled {
 
 .chat-toolbar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -615,6 +640,14 @@ button:disabled {
   .chat-history {
     min-height: 180px;
     max-height: 320px;
+  }
+
+  .project-card-row {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-toolbar {
+    grid-template-columns: 1fr;
   }
 
   .chat-bubble {

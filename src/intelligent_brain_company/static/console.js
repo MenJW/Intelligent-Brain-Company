@@ -1,6 +1,18 @@
 const state = {
   projects: [],
   activeProject: null,
+  chatHistoryByProject: {},
+}
+
+function getCachedChatHistory(projectId, agent) {
+  return state.chatHistoryByProject[projectId]?.[agent] || []
+}
+
+function setCachedChatHistory(projectId, agent, history) {
+  if (!state.chatHistoryByProject[projectId]) {
+    state.chatHistoryByProject[projectId] = {}
+  }
+  state.chatHistoryByProject[projectId][agent] = history
 }
 
 const projectList = document.getElementById('project-list')
@@ -17,6 +29,7 @@ const diffFrom = document.getElementById('diff-from')
 const diffTo = document.getElementById('diff-to')
 const diffOutput = document.getElementById('diff-output')
 const chatAgentSelect = document.getElementById('chat-agent')
+const chatHistoryScopeSelect = document.getElementById('chat-history-scope')
 const chatHistory = document.getElementById('chat-history')
 const chatStatus = document.getElementById('chat-status')
 const sendChatButton = document.getElementById('send-chat')
@@ -45,9 +58,21 @@ const AGENT_PROFILES = {
 }
 
 const USER_PROFILE = { name: '你', avatar: '你', hue: 188 }
+const STAGE_REPLAY_PROFILE = { name: '阶段评审回放', avatar: '回', hue: 270 }
 
 function profileByAgent(agent) {
   return AGENT_PROFILES[agent] || { name: agent, avatar: String(agent || '?').slice(0, 1), hue: 210 }
+}
+
+function profileByTurn(agent, turn) {
+  if (turn.source === 'stage_review') {
+    return STAGE_REPLAY_PROFILE
+  }
+  if (turn.source === 'employee_statement') {
+    const speaker = String(turn.speaker || '员工')
+    return { name: speaker, avatar: speaker.slice(0, 1), hue: 94 }
+  }
+  return profileByAgent(agent)
 }
 
 function escapeHtml(text) {
@@ -71,6 +96,27 @@ function updateGenerateButton(project) {
   const action = NEXT_STAGE_ACTION[project.current_stage] || '执行下一环节'
   generatePlanButton.textContent = action
   generatePlanButton.disabled = project.current_stage === 'board'
+}
+
+function resetProjectView() {
+  state.activeProject = null
+  projectName.textContent = '未选择项目'
+  projectMeta.textContent = '请先创建项目或选择已有项目。'
+  planMarkdown.textContent = '尚未生成计划。'
+  renderScorecard(null)
+  stageProgress.innerHTML = ''
+  timeline.innerHTML = ''
+  diffFrom.innerHTML = ''
+  diffTo.innerHTML = ''
+  diffOutput.textContent = '至少需要两个版本。'
+  chatHistory.innerHTML = ''
+  chatStatus.textContent = '聊天内容可以直接提升为正式干预并触发重算。'
+  generatePlanButton.textContent = '执行下一环节'
+  generatePlanButton.disabled = true
+  submitInterventionButton.disabled = true
+  sendChatButton.disabled = true
+  refreshChatButton.disabled = true
+  loadDiffButton.disabled = true
 }
 
 const DEMO_PROJECTS = [
@@ -186,17 +232,34 @@ function renderScorecard(scorecard) {
 function renderProjects() {
   projectList.innerHTML = ''
   state.projects.forEach((project) => {
-    const button = document.createElement('button')
-    button.className = `project-card ${state.activeProject?.project_id === project.project_id ? 'active' : ''}`
-    button.innerHTML = `
+    const row = document.createElement('div')
+    row.className = 'project-card-row'
+
+    const openButton = document.createElement('button')
+    openButton.className = `project-card ${state.activeProject?.project_id === project.project_id ? 'active' : ''}`
+    openButton.type = 'button'
+    openButton.innerHTML = `
       <div class="project-card-title">${project.name}</div>
       <div class="project-card-meta">${project.status} · ${project.plans.length} versions</div>
     `
-    button.addEventListener('click', async () => {
+    openButton.addEventListener('click', async () => {
       const fresh = await api(`/api/projects/${project.project_id}`)
       showProject(fresh)
     })
-    projectList.appendChild(button)
+
+    const deleteButton = document.createElement('button')
+    deleteButton.className = 'project-delete-button'
+    deleteButton.type = 'button'
+    deleteButton.textContent = '删除'
+    deleteButton.addEventListener('click', async () => {
+      const confirmed = window.confirm(`确认删除项目“${project.name}”吗？此操作不可恢复。`)
+      if (!confirmed) return
+      await deleteProject(project.project_id)
+    })
+
+    row.appendChild(openButton)
+    row.appendChild(deleteButton)
+    projectList.appendChild(row)
   })
 }
 
@@ -254,8 +317,17 @@ function renderDiffSelectors(plans) {
 
 function renderChat(agent, history) {
   const agentProfile = profileByAgent(agent)
+  const historyScope = chatHistoryScopeSelect?.value || 'all'
+  const currentStage = state.activeProject?.current_stage
+  const visibleHistory = historyScope === 'current_stage'
+    ? history.filter((turn) => !turn.suggested_stage || turn.suggested_stage === currentStage)
+    : history
+
   chatHistory.innerHTML = ''
-  if (!history.length) {
+  if (!visibleHistory.length) {
+    const emptyText = historyScope === 'current_stage'
+      ? '当前环节下还没有可展示的记录。'
+      : '当前角色还没有对话记录。'
     chatHistory.innerHTML = `
       <div class="chat-row incoming">
         <div class="chat-avatar" style="${avatarStyle(agentProfile)}">${escapeHtml(agentProfile.avatar)}</div>
@@ -263,43 +335,56 @@ function renderChat(agent, history) {
           <div class="chat-bubble-head">
             <span class="chat-role">${escapeHtml(agentProfile.name)}</span>
           </div>
-          <div class="chat-message">当前角色还没有对话记录。</div>
+          <div class="chat-message">${emptyText}</div>
         </div>
       </div>
     `
     return
   }
 
-  history.forEach((turn) => {
-    const userRow = document.createElement('div')
-    userRow.className = 'chat-row outgoing'
-    userRow.innerHTML = `
-      <div class="chat-bubble user">
-        <div class="chat-bubble-head">
-          <span class="chat-role">${escapeHtml(USER_PROFILE.name)}</span>
-          <span class="chat-time">${new Date(turn.created_at).toLocaleString()}</span>
+  visibleHistory.forEach((turn) => {
+    const source = turn.source || 'chat'
+    const replyProfile = profileByTurn(agent, turn)
+
+    if (source === 'chat' && turn.user_message) {
+      const userRow = document.createElement('div')
+      userRow.className = 'chat-row outgoing'
+      userRow.innerHTML = `
+        <div class="chat-bubble user">
+          <div class="chat-bubble-head">
+            <span class="chat-role">${escapeHtml(USER_PROFILE.name)}</span>
+            <span class="chat-time">${new Date(turn.created_at).toLocaleString()}</span>
+          </div>
+          <div class="chat-message">${formatChatBody(turn.user_message)}</div>
         </div>
-        <div class="chat-message">${formatChatBody(turn.user_message)}</div>
-      </div>
-      <div class="chat-avatar" style="${avatarStyle(USER_PROFILE)}">${escapeHtml(USER_PROFILE.avatar)}</div>
-    `
-    chatHistory.appendChild(userRow)
+        <div class="chat-avatar" style="${avatarStyle(USER_PROFILE)}">${escapeHtml(USER_PROFILE.avatar)}</div>
+      `
+      chatHistory.appendChild(userRow)
+    }
 
     const reply = document.createElement('div')
     reply.className = 'chat-row incoming'
     const promoteButton = turn.can_promote_to_intervention
       ? `<div class="chat-actions"><button class="chat-promote" data-turn-id="${turn.turn_id}">转成正式干预并重算</button></div>`
       : ''
+    const sourceLabel =
+      source === 'stage_review'
+        ? '阶段评审输出'
+        : source === 'employee_statement'
+          ? '员工发言'
+          : `${turn.used_llm ? 'LLM' : 'Fallback'} · 建议阶段 ${escapeHtml(turn.suggested_stage)}`
+    const impactLabel =
+      source === 'chat' ? `建议影响: ${escapeHtml(turn.suggested_impact)}` : `来源: ${escapeHtml(turn.suggested_impact)}`
     reply.innerHTML = `
-      <div class="chat-avatar" style="${avatarStyle(agentProfile)}">${escapeHtml(agentProfile.avatar)}</div>
+      <div class="chat-avatar" style="${avatarStyle(replyProfile)}">${escapeHtml(replyProfile.avatar)}</div>
       <div class="chat-bubble agent">
         <div class="chat-bubble-head">
-          <span class="chat-role">${escapeHtml(agentProfile.name)}</span>
+          <span class="chat-role">${escapeHtml(replyProfile.name)}</span>
           <span class="chat-time">${new Date(turn.created_at).toLocaleString()}</span>
         </div>
         <div class="chat-message">${formatChatBody(turn.assistant_message)}</div>
-        <div class="chat-meta">${turn.used_llm ? 'LLM' : 'Fallback'} · 建议阶段 ${escapeHtml(turn.suggested_stage)}</div>
-        <div class="chat-meta">建议影响: ${escapeHtml(turn.suggested_impact)}</div>
+        <div class="chat-meta">${sourceLabel}</div>
+        <div class="chat-meta">${impactLabel}</div>
         ${promoteButton}
       </div>
     `
@@ -309,12 +394,36 @@ function renderChat(agent, history) {
 }
 
 async function loadProjects() {
+  const previousProjectId = state.activeProject?.project_id
   const projects = await api('/api/projects')
   state.projects = projects
+
+  if (projects.length === 0) {
+    renderProjects()
+    resetProjectView()
+    return
+  }
+
+  if (previousProjectId) {
+    const stillExists = projects.some((project) => project.project_id === previousProjectId)
+    if (!stillExists) {
+      state.activeProject = null
+    }
+  }
+
   renderProjects()
-  if (!state.activeProject && projects.length > 0) {
+  if (!state.activeProject) {
     showProject(projects[0])
   }
+}
+
+async function deleteProject(projectId) {
+  await api(`/api/projects/${projectId}`, { method: 'DELETE' })
+  delete state.chatHistoryByProject[projectId]
+  if (state.activeProject?.project_id === projectId) {
+    state.activeProject = null
+  }
+  await loadProjects()
 }
 
 async function createProject(payload, autoGenerate = false) {
@@ -349,6 +458,7 @@ async function loadTimeline(projectId) {
 
 async function loadChat(projectId, agent) {
   const data = await api(`/api/projects/${projectId}/chat?agent=${encodeURIComponent(agent)}`)
+  setCachedChatHistory(projectId, agent, data.history)
   renderChat(data.agent, data.history)
 }
 
@@ -427,6 +537,7 @@ document.getElementById('chat-form').addEventListener('submit', async (event) =>
     method: 'POST',
     body: JSON.stringify({ agent, message }),
   })
+  setCachedChatHistory(state.activeProject.project_id, agent, data.history)
   renderChat(data.agent, data.history)
   chatStatus.textContent = '已收到回复，可直接提升为正式干预。'
   messageField.value = ''
@@ -454,6 +565,12 @@ refreshChatButton.addEventListener('click', async () => {
 chatAgentSelect.addEventListener('change', async () => {
   if (!state.activeProject) return
   await loadChat(state.activeProject.project_id, chatAgentSelect.value)
+})
+chatHistoryScopeSelect.addEventListener('change', () => {
+  if (!state.activeProject) return
+  const agent = chatAgentSelect.value
+  const history = getCachedChatHistory(state.activeProject.project_id, agent)
+  renderChat(agent, history)
 })
 
 loadProjects().catch((error) => {

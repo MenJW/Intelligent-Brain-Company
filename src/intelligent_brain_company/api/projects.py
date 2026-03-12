@@ -40,3 +40,12 @@ def get_project(project_id: str):
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
     return jsonify({"success": True, "data": project.to_dict()})
+
+
+@projects_bp.route("/api/projects/<project_id>", methods=["DELETE"])
+def delete_project(project_id: str):
+    store = current_app.extensions["project_store"]
+    deleted = store.delete_project(project_id)
+    if not deleted:
+        return jsonify({"success": False, "error": "project not found"}), 404
+    return jsonify({"success": True, "data": {"project_id": project_id}})

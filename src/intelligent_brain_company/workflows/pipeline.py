@@ -59,27 +59,55 @@ class CompanyPipeline:
         brief: IdeaBrief,
         interventions: list[UserIntervention] | None = None,
     ) -> ProjectPlan:
+        return self.run_until(brief=brief, stage=Stage.BOARD, interventions=interventions)
+
+    def run_until(
+        self,
+        brief: IdeaBrief,
+        stage: Stage,
+        interventions: list[UserIntervention] | None = None,
+    ) -> ProjectPlan:
         active_interventions = interventions or []
         fallback_research = self._build_default_research(brief, active_interventions)
         research = self.research_agent.analyze(brief, active_interventions, fallback_research)
-        department_solutions = self._generate_department_solutions(brief, active_interventions)
-        roundtable_reviews = self._run_roundtables(department_solutions, active_interventions)
-        selected_solutions = self._select_solutions(department_solutions)
-        fallback_board = self._build_default_board_review(brief, selected_solutions, research, active_interventions)
-        board_decision = self.board_agent.review(
-            brief,
-            research,
-            selected_solutions,
-            active_interventions,
-            fallback_board,
+
+        needs_department_design = stage in {Stage.DEPARTMENT_DESIGN, Stage.ROUNDTABLE, Stage.SYNTHESIS, Stage.BOARD}
+        needs_roundtable = stage in {Stage.ROUNDTABLE, Stage.SYNTHESIS, Stage.BOARD}
+        needs_synthesis = stage in {Stage.SYNTHESIS, Stage.BOARD}
+        needs_board = stage == Stage.BOARD
+
+        department_solutions = (
+            self._generate_department_solutions(brief, active_interventions)
+            if needs_department_design
+            else {}
         )
-        scorecard = self._build_scorecard(
-            brief,
-            research,
-            selected_solutions,
-            board_decision,
-            active_interventions,
+        roundtable_reviews = (
+            self._run_roundtables(department_solutions, active_interventions)
+            if needs_roundtable
+            else []
         )
+        selected_solutions = self._select_solutions(department_solutions) if needs_synthesis else {}
+
+        if needs_board:
+            fallback_board = self._build_default_board_review(brief, selected_solutions, research, active_interventions)
+            board_decision = self.board_agent.review(
+                brief,
+                research,
+                selected_solutions,
+                active_interventions,
+                fallback_board,
+            )
+            scorecard = self._build_scorecard(
+                brief,
+                research,
+                selected_solutions,
+                board_decision,
+                active_interventions,
+            )
+        else:
+            board_decision = self._build_pending_board_decision(stage)
+            scorecard = None
+
         return ProjectPlan(
             idea=brief,
             research=research,
@@ -89,6 +117,16 @@ class CompanyPipeline:
             board_decision=board_decision,
             scorecard=scorecard,
             interventions=active_interventions,
+        )
+
+    def _build_pending_board_decision(self, stage: Stage) -> BoardDecision:
+        return BoardDecision(
+            approved=False,
+            development_difficulty="pending",
+            budget_outlook="pending",
+            funding_cycle="pending",
+            rationale=f"Board decision is pending until board stage. Current stage: {stage.value}.",
+            conditions=[],
         )
 
     def render_markdown(self, plan: ProjectPlan) -> str:
