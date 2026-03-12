@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from statistics import mean
 
+from intelligent_brain_company.agents.registry import AgentProfile, department_teams
 from intelligent_brain_company.agents.runtime import BoardAgent, DepartmentAgent, ResearchAgent
 from intelligent_brain_company.domain.models import (
     BoardDecision,
@@ -134,6 +135,32 @@ class CompanyPipeline:
                         rendered = str(value)
                     lines.append(f"- {key.replace('_', ' ').title()}: {rendered}")
             lines.append("")
+        lines.append("## Cross-Department Roundtable Discussions")
+        lines.append("")
+        for review in plan.roundtable_reviews:
+            lines.append(f"### {review.department.value.title()} - {review.solution_name}")
+            lines.append("")
+            lines.append(f"- Decision: {review.decision}")
+            if review.reviewers:
+                lines.append(f"- Reviewing departments: {', '.join(item.value for item in review.reviewers)}")
+            if review.participant_profiles:
+                lines.append("- Participants:")
+                for member in review.participant_profiles:
+                    focus = ", ".join(str(item) for item in member.get("capability_focus", []))
+                    lines.append(
+                        "  - "
+                        f"{member.get('name')} ({member.get('title')}, {member.get('department')}) | "
+                        f"personality: {member.get('personality')} | focus: {focus}"
+                    )
+            if review.discussion_log:
+                lines.append("- Discussion log:")
+                for turn in review.discussion_log:
+                    lines.append(f"  - {turn}")
+            if review.concerns:
+                lines.append(f"- Concerns: {'; '.join(review.concerns)}")
+            if review.action_items:
+                lines.append(f"- Action items: {'; '.join(review.action_items)}")
+            lines.append("")
         lines.append("## Board Decision")
         lines.append("")
         lines.append(f"- Approved: {'yes' if plan.board_decision.approved else 'no'}")
@@ -185,6 +212,7 @@ class CompanyPipeline:
         brief: IdeaBrief,
         interventions: list[UserIntervention],
     ) -> dict[Department, list[DepartmentSolution]]:
+        teams = department_teams()
         context = self._constraint_text(brief, interventions)
         fallback_solutions = {
             Department.HARDWARE: self._build_solution_set(
@@ -225,8 +253,34 @@ class CompanyPipeline:
         }
         resolved: dict[Department, list[DepartmentSolution]] = {}
         for department, solutions in fallback_solutions.items():
+            team_members = teams.get(department, ())
+            enriched_fallback = [
+                DepartmentSolution(
+                    department=solution.department,
+                    name=solution.name,
+                    summary=solution.summary,
+                    feasibility_score=solution.feasibility_score,
+                    dependencies=list(solution.dependencies),
+                    assumptions=list(solution.assumptions),
+                    rationale=solution.rationale,
+                    implementation_steps=list(solution.implementation_steps),
+                    success_metrics=list(solution.success_metrics),
+                    artifacts={
+                        **solution.artifacts,
+                        "team_owners": [
+                            f"{member.name} ({member.title})"
+                            for member in team_members
+                        ],
+                    },
+                )
+                for solution in solutions
+            ]
             agent = self.department_agents.get(department)
-            resolved[department] = agent.plan(brief, interventions, solutions) if agent else solutions
+            resolved[department] = (
+                agent.plan(brief, interventions, enriched_fallback, team_members)
+                if agent
+                else enriched_fallback
+            )
         return resolved
 
     def _build_solution_set(
@@ -311,6 +365,7 @@ class CompanyPipeline:
         department_solutions: dict[Department, list[DepartmentSolution]],
         interventions: list[UserIntervention],
     ) -> list[RoundtableReview]:
+        teams = department_teams()
         reviews: list[RoundtableReview] = []
         for department, solutions in department_solutions.items():
             for solution in solutions:
@@ -320,6 +375,8 @@ class CompanyPipeline:
                 ]
                 if self._has_stage_intervention(interventions, Stage.ROUNDTABLE):
                     concerns.append("User intervention requires explicit revalidation of tradeoffs.")
+                participant_profiles = self._build_participant_profiles(teams, self._solution_team_departments(solution))
+                discussion_log = self._build_roundtable_discussion(solution, participant_profiles)
                 reviews.append(
                     RoundtableReview(
                         department=department,
@@ -331,9 +388,57 @@ class CompanyPipeline:
                             "Document dependency assumptions.",
                             "Quantify cost and timing impact for the board pack.",
                         ],
+                        participant_profiles=participant_profiles,
+                        discussion_log=discussion_log,
                     )
                 )
         return reviews
+
+    def _solution_team_departments(self, solution: DepartmentSolution) -> list[Department]:
+        seen: list[Department] = [solution.department]
+        for item in solution.dependencies:
+            if item not in seen:
+                seen.append(item)
+        return seen
+
+    def _build_participant_profiles(
+        self,
+        teams: dict[Department, tuple[AgentProfile, ...]],
+        departments: list[Department],
+    ) -> list[dict[str, object]]:
+        participants: list[dict[str, object]] = []
+        for department in departments:
+            for member in teams.get(department, ()):
+                participants.append(
+                    {
+                        "employee_id": member.employee_id,
+                        "name": member.name,
+                        "title": member.title,
+                        "department": member.department.value,
+                        "personality": member.personality,
+                        "capability_focus": list(member.capability_focus),
+                        "inspired_by": member.inspired_by,
+                    }
+                )
+        return participants
+
+    def _build_roundtable_discussion(
+        self,
+        solution: DepartmentSolution,
+        participants: list[dict[str, object]],
+    ) -> list[str]:
+        lines: list[str] = []
+        if not participants:
+            return lines
+        focus_area = solution.success_metrics[0] if solution.success_metrics else "delivery reliability"
+        for member in participants:
+            focus_list = [str(item) for item in member.get("capability_focus", [])]
+            primary_focus = focus_list[0] if focus_list else "cross-functional risk checks"
+            lines.append(
+                f"{member.get('name')} ({member.get('title')}) raised {primary_focus} implications for "
+                f"{solution.name} and asked the team to preserve {focus_area}."
+            )
+        return lines
 
     def _select_solutions(
         self,

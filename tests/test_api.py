@@ -35,6 +35,9 @@ def test_create_project_and_generate_plan(tmp_path: Path) -> None:
     assert payload["task"]["status"] == "completed"
     assert payload["project"]["latest_plan_markdown"]
     assert payload["project"]["latest_plan"]["scorecard"]["recommendation"] in {"Go", "Maybe", "No-Go"}
+    first_roundtable = payload["project"]["latest_plan"]["roundtable_reviews"][0]
+    assert first_roundtable["participant_profiles"]
+    assert first_roundtable["discussion_log"]
 
 
 def test_intervention_creates_new_plan_version(tmp_path: Path) -> None:

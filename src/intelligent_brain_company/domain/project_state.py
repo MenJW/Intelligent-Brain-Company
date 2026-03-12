@@ -74,6 +74,8 @@ def deserialize_project_plan(data: dict[str, Any]) -> ProjectPlan:
                 decision=review["decision"],
                 concerns=review.get("concerns", []),
                 action_items=review.get("action_items", []),
+                participant_profiles=review.get("participant_profiles", []),
+                discussion_log=review.get("discussion_log", []),
             )
             for review in data.get("roundtable_reviews", [])
         ],

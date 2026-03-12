@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from intelligent_brain_company.agents.contracts import department_contract_prompt, parse_department_solutions
+from intelligent_brain_company.agents.registry import AgentProfile
 from intelligent_brain_company.domain.models import (
     BoardDecision,
     Department,
@@ -143,18 +144,29 @@ class DepartmentAgent:
         brief: IdeaBrief,
         interventions: list[UserIntervention],
         fallback: list[DepartmentSolution],
+        team_members: tuple[AgentProfile, ...] = (),
     ) -> list[DepartmentSolution]:
         if self.llm_client is None:
             return fallback
 
+        team_context = "\n".join(
+            (
+                f"- {member.name} ({member.title}): personality={member.personality}; "
+                f"focus={', '.join(member.capability_focus)}; inspired_by={member.inspired_by}"
+            )
+            for member in team_members
+        )
         system_prompt = department_contract_prompt(self.department)
         user_prompt = (
             f"Idea title: {brief.title}\n"
             f"Idea summary: {brief.summary or 'N/A'}\n"
             f"Constraints and intervention impact: {_constraints_text(brief, interventions)}\n"
             f"Success metrics: {', '.join(brief.success_metrics) or 'N/A'}\n"
+            "Department employee roster (all members must contribute to the final plan):\n"
+            f"{team_context or '- no explicit roster provided'}\n"
             "Return practical, differentiated options with realistic execution tradeoffs. "
-            "Make artifacts specific and actionable rather than generic labels."
+            "Make artifacts specific and actionable rather than generic labels. "
+            "Add one team ownership artifact containing all roster members and their responsibility split."
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt)
         if not data:

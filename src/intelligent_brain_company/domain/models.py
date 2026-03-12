@@ -69,6 +69,8 @@ class RoundtableReview:
     decision: str
     concerns: list[str]
     action_items: list[str]
+    participant_profiles: list[dict[str, object]] = field(default_factory=list)
+    discussion_log: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

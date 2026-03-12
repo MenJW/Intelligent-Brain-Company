@@ -80,7 +80,8 @@ Intelligent Brain Company 想解决的是这个问题：
    系统先建立背景认知，包括市场、竞争、机会、风险、可行性等。
 
 3. **部门评审（Department Review）**  
-   不同 AI 角色 / 部门从不同角度分析这个想法。
+   不同 AI 角色 / 部门从不同角度分析这个想法。每个部门固定 3-5 名虚拟员工，
+   每名员工都有姓名、职务、性格和能力侧重，并且都要参与部门方案制定。
 
    例如：
    - 市场 / 研究
@@ -93,7 +94,11 @@ Intelligent Brain Company 想解决的是这个问题：
 4. **董事会评审（Board Review）**  
    将问题升级到更高层级的判断流程，模拟公司治理式审查。
 
-5. **评分卡（Scorecards）**  
+5. **多部门联合评审留痕（Roundtable Discussion Log）**
+   在跨部门联合评审中，相关部门的所有员工都会参与讨论，系统会保留完整讨论记录，
+   便于用户回看每位员工提出的关注点和行动建议。
+
+6. **评分卡（Scorecards）**  
    从多个维度给项目打分，例如：
    - 市场吸引力
    - 执行难度
@@ -102,7 +107,7 @@ Intelligent Brain Company 想解决的是这个问题：
    - 时机
    - 风险水平
 
-6. **干预驱动重规划（Intervention-Driven Replanning）**  
+7. **干预驱动重规划（Intervention-Driven Replanning）**  
    如果发现重大缺陷，系统不只是“否掉”，还会尝试给出缩小范围、重新定位或 pivot 的建议。
 
 ---
@@ -148,6 +153,7 @@ Intelligent Brain Company 想解决的是这个问题：
 
 ### Departments
 通过多个“部门”从不同视角提出意见，而不是把所有判断压缩成一句话。
+当前每个部门为 3-5 名 AI 员工编制，员工画像参考了 `agency-agents` 项目中的专业角色（如 Growth Hacker、UX Architect、DevOps Automator、Finance Tracker 等），并映射为本项目的虚拟姓名与职务。
 
 ### Board Review
 引入董事会层级，让系统更像真实组织里的治理与决策流程。
@@ -244,7 +250,8 @@ cd Intelligent-Brain-Company
 
 ## Roadmap
 
-- [ ] 提升各部门角色的专业化程度
+- [x] 每部门扩展为 3-5 名员工并补充性格/能力画像
+- [x] 多部门联合评审支持全员参与与讨论留痕
 - [ ] 增强董事会辩论机制
 - [ ] 丰富评分卡维度
 - [ ] 增加对未来 6–12 个月创业结果的情景模拟

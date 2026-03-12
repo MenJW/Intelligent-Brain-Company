@@ -32,7 +32,7 @@ DEPARTMENT_CONTRACTS: dict[Department, DepartmentContract] = {
             "Design hardware paths for a new product. Emphasize BOM structure, manufacturability, certification, "
             "spare parts strategy, and prototype risk."
         ),
-        artifact_keys=("bom_targets", "manufacturing_notes", "certification_path", "supply_chain_risks"),
+        artifact_keys=("bom_targets", "manufacturing_notes", "certification_path", "supply_chain_risks", "team_owners"),
     ),
     Department.SOFTWARE: DepartmentContract(
         department=Department.SOFTWARE,
@@ -41,7 +41,7 @@ DEPARTMENT_CONTRACTS: dict[Department, DepartmentContract] = {
             "Design software options with clear service boundaries, interface contracts, control stack responsibilities, "
             "data flow, and operational risk."
         ),
-        artifact_keys=("interface_boundaries", "system_components", "data_flows", "operational_risks"),
+        artifact_keys=("interface_boundaries", "system_components", "data_flows", "operational_risks", "team_owners"),
     ),
     Department.DESIGN: DepartmentContract(
         department=Department.DESIGN,
@@ -50,7 +50,7 @@ DEPARTMENT_CONTRACTS: dict[Department, DepartmentContract] = {
             "Design product and experience directions that explicitly list design constraints, ergonomic goals, "
             "serviceability rules, and safety cues."
         ),
-        artifact_keys=("design_constraints", "ergonomic_targets", "safety_cues", "serviceability_rules"),
+        artifact_keys=("design_constraints", "ergonomic_targets", "safety_cues", "serviceability_rules", "team_owners"),
     ),
     Department.MARKETING: DepartmentContract(
         department=Department.MARKETING,
@@ -59,7 +59,7 @@ DEPARTMENT_CONTRACTS: dict[Department, DepartmentContract] = {
             "Design go-to-market options with wedge segments, channel budget splits, launch narrative, partnership plan, "
             "and conversion assumptions."
         ),
-        artifact_keys=("channel_budget", "wedge_segments", "launch_narrative", "partnership_plan"),
+        artifact_keys=("channel_budget", "wedge_segments", "launch_narrative", "partnership_plan", "team_owners"),
     ),
     Department.FINANCE: DepartmentContract(
         department=Department.FINANCE,
@@ -68,7 +68,7 @@ DEPARTMENT_CONTRACTS: dict[Department, DepartmentContract] = {
             "Design finance options with capital envelope, pricing logic, unit economics assumptions, funding sequence, "
             "and downside controls."
         ),
-        artifact_keys=("capital_envelope", "pricing_logic", "unit_economics", "downside_controls"),
+        artifact_keys=("capital_envelope", "pricing_logic", "unit_economics", "downside_controls", "team_owners"),
     ),
 }
 
