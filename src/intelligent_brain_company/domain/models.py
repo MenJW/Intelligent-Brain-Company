@@ -58,6 +58,7 @@ class DepartmentSolution:
     rationale: str = ""
     implementation_steps: list[str] = field(default_factory=list)
     success_metrics: list[str] = field(default_factory=list)
+    artifacts: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

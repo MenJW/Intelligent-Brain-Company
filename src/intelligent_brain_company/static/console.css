@@ -284,6 +284,12 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.chat-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
 .chat-bubble.user {
   background: rgba(184, 92, 56, 0.08);
 }
@@ -304,4 +310,17 @@ button:disabled {
   margin-top: 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.chat-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.chat-promote {
+  width: auto;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(184, 92, 56, 0.12);
 }

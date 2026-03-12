@@ -10,6 +10,8 @@ Research and board stages can now use a real OpenAI-compatible LLM endpoint when
 
 Hardware, software, design, marketing, and finance departments now also support structured LLM generation through explicit JSON contracts, and the console includes a direct chat panel for talking to research, board, or department agents.
 
+Project, task, timeline, chat, and version data are now persisted in SQLite instead of per-file JSON blobs.
+
 ## Why This Project
 
 Most multi-agent projects stop at role-playing or software-only collaboration. Your idea is stronger than that: it treats AI agents as a company with explicit departments, governance, review loops, and human intervention at any stage.
@@ -35,7 +37,7 @@ The current scaffold focuses on the smallest useful end-to-end slice:
 - A CLI command that turns an idea into a structured draft plan.
 - A Flask API for creating projects, generating plans, and recording interventions.
 - A chat API and console panel for direct conversation with research, board, and department agents.
-- File-based persistence for project state and task history.
+- SQLite-backed persistence for project state, task history, versions, and chat records.
 - Documentation for execution roadmap and license strategy.
 
 This is intentionally framework-light. The current implementation keeps orchestration logic independent so that you can later plug in AutoGen, CrewAI, LangGraph, Semantic Kernel, or custom model routing without rewriting the business workflow.
@@ -99,6 +101,8 @@ Example flow:
 2. POST /api/planning/generate to generate the first plan version.
 3. POST /api/planning/interventions to insert user feedback and regenerate.
 4. GET /api/projects/<project_id> to inspect the stored state.
+5. POST /api/projects/<project_id>/chat to talk to research, board, or a department.
+6. POST /api/projects/<project_id>/chat/promote to turn a chat turn into a formal intervention and trigger regeneration.
 
 Open the control surface at http://127.0.0.1:8000 to create projects, view plans, inspect timeline and progress, and submit interventions.
 

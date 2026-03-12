@@ -14,6 +14,7 @@ const diffTo = document.getElementById('diff-to')
 const diffOutput = document.getElementById('diff-output')
 const chatAgentSelect = document.getElementById('chat-agent')
 const chatHistory = document.getElementById('chat-history')
+const chatStatus = document.getElementById('chat-status')
 const sendChatButton = document.getElementById('send-chat')
 const refreshChatButton = document.getElementById('refresh-chat')
 const generatePlanButton = document.getElementById('generate-plan')
@@ -136,10 +137,15 @@ function renderChat(agent, history) {
 
     const reply = document.createElement('div')
     reply.className = 'chat-bubble agent'
+    const promoteButton = turn.can_promote_to_intervention
+      ? `<div class="chat-actions"><button class="chat-promote" data-turn-id="${turn.turn_id}">转成正式干预并重算</button></div>`
+      : ''
     reply.innerHTML = `
       <div class="chat-role">${agent}</div>
       <div>${turn.assistant_message}</div>
       <div class="chat-meta">${turn.used_llm ? 'LLM' : 'Fallback'} · ${new Date(turn.created_at).toLocaleString()}</div>
+      <div class="chat-meta">建议阶段: ${turn.suggested_stage} · 建议影响: ${turn.suggested_impact}</div>
+      ${promoteButton}
     `
     chatHistory.appendChild(reply)
   })
@@ -168,6 +174,18 @@ async function loadTimeline(projectId) {
 async function loadChat(projectId, agent) {
   const data = await api(`/api/projects/${projectId}/chat?agent=${encodeURIComponent(agent)}`)
   renderChat(data.agent, data.history)
+}
+
+async function promoteTurn(turnId) {
+  if (!state.activeProject) return
+  chatStatus.textContent = '正在将聊天提升为正式干预并重算...'
+  const data = await api(`/api/projects/${state.activeProject.project_id}/chat/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ turn_id: turnId }),
+  })
+  showProject(data.project)
+  await loadProjects()
+  chatStatus.textContent = `已根据 ${data.promoted_turn.turn_id} 生成新版本。`
 }
 
 document.getElementById('create-project-form').addEventListener('submit', async (event) => {
@@ -232,7 +250,14 @@ document.getElementById('chat-form').addEventListener('submit', async (event) =>
     body: JSON.stringify({ agent, message }),
   })
   renderChat(data.agent, data.history)
+  chatStatus.textContent = '已收到回复，可直接提升为正式干预。'
   messageField.value = ''
+})
+
+chatHistory.addEventListener('click', async (event) => {
+  const button = event.target.closest('.chat-promote')
+  if (!button) return
+  await promoteTurn(button.dataset.turnId)
 })
 
 loadDiffButton.addEventListener('click', async () => {

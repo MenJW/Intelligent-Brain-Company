@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from intelligent_brain_company.app import create_app
@@ -119,3 +120,41 @@ def test_chat_endpoint_persists_history(tmp_path: Path) -> None:
     history = client.get(f"/api/projects/{project_id}/chat?agent=research")
     assert history.status_code == 200
     assert len(history.get_json()["data"]["history"]) == 1
+
+
+def test_chat_turn_can_be_promoted_to_intervention_and_regenerated(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Compact Cargo EV"}).get_json()["data"]
+    project_id = created["project_id"]
+    client.post("/api/planning/generate", json={"project_id": project_id})
+
+    chat = client.post(
+        f"/api/projects/{project_id}/chat",
+        json={"agent": "hardware", "message": "请优先降低电池包维护复杂度"},
+    ).get_json()["data"]
+    turn_id = chat["turn"]["turn_id"]
+
+    promoted = client.post(
+        f"/api/projects/{project_id}/chat/promote",
+        json={"turn_id": turn_id},
+    )
+    assert promoted.status_code == 200
+    project = promoted.get_json()["data"]["project"]
+    assert len(project["interventions"]) == 1
+    assert len(project["plans"]) == 2
+
+
+def test_sqlite_database_is_used_for_persistence(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+    config = app.config["IBC_CONFIG"]
+
+    created = client.post("/api/projects", json={"title": "Fleet Battery Swap"})
+    assert created.status_code == 201
+    assert config.database_path.exists()
+
+    with sqlite3.connect(config.database_path) as connection:
+        project_count = connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+        assert project_count >= 1

@@ -52,6 +52,7 @@ def deserialize_department_solution(data: dict[str, Any]) -> DepartmentSolution:
         rationale=data.get("rationale", ""),
         implementation_steps=data.get("implementation_steps", []),
         success_metrics=data.get("success_metrics", []),
+        artifacts=data.get("artifacts", {}),
     )
 
 
@@ -108,11 +109,15 @@ class TaskStatus(str, Enum):
 
 @dataclass(slots=True)
 class ConversationTurn:
+    turn_id: str
     agent: str
     user_message: str
     assistant_message: str
     created_at: str
     used_llm: bool = False
+    suggested_stage: str = Stage.RESEARCH.value
+    suggested_impact: str = "revise downstream conclusions"
+    can_promote_to_intervention: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -120,11 +125,15 @@ class ConversationTurn:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConversationTurn":
         return cls(
+            turn_id=data.get("turn_id", f"turn_{uuid4().hex[:12]}"),
             agent=data["agent"],
             user_message=data["user_message"],
             assistant_message=data["assistant_message"],
             created_at=data["created_at"],
             used_llm=bool(data.get("used_llm", False)),
+            suggested_stage=data.get("suggested_stage", Stage.RESEARCH.value),
+            suggested_impact=data.get("suggested_impact", "revise downstream conclusions"),
+            can_promote_to_intervention=bool(data.get("can_promote_to_intervention", True)),
         )
 
 
@@ -224,13 +233,26 @@ class ProjectRecord:
                 return version
         return None
 
-    def append_conversation(self, agent: str, user_message: str, assistant_message: str, used_llm: bool) -> ConversationTurn:
+    def append_conversation(
+        self,
+        agent: str,
+        user_message: str,
+        assistant_message: str,
+        used_llm: bool,
+        suggested_stage: str,
+        suggested_impact: str,
+        can_promote_to_intervention: bool = True,
+    ) -> ConversationTurn:
         turn = ConversationTurn(
+            turn_id=f"turn_{uuid4().hex[:12]}",
             agent=agent,
             user_message=user_message,
             assistant_message=assistant_message,
             created_at=utc_now(),
             used_llm=used_llm,
+            suggested_stage=suggested_stage,
+            suggested_impact=suggested_impact,
+            can_promote_to_intervention=can_promote_to_intervention,
         )
         self.conversations.setdefault(agent, []).append(turn)
         self.touch()
@@ -238,6 +260,13 @@ class ProjectRecord:
 
     def get_conversation(self, agent: str) -> list[ConversationTurn]:
         return self.conversations.get(agent, [])
+
+    def find_turn(self, turn_id: str) -> ConversationTurn | None:
+        for turns in self.conversations.values():
+            for turn in turns:
+                if turn.turn_id == turn_id:
+                    return turn
+        return None
 
     def build_stage_progress(self) -> list[dict[str, Any]]:
         if self.status == ProjectStatus.REVIEWING and self.current_stage != Stage.BOARD:
@@ -294,6 +323,17 @@ class ProjectRecord:
                     "detail": f"{intervention.speaker}: {intervention.message}",
                 }
             )
+        for agent, turns in self.conversations.items():
+            for turn in turns:
+                events.append(
+                    {
+                        "timestamp": turn.created_at,
+                        "type": "chat",
+                        "title": f"Chat with {agent}",
+                        "detail": turn.user_message,
+                        "turn_id": turn.turn_id,
+                    }
+                )
         events.sort(key=lambda item: item["timestamp"])
         return events
 

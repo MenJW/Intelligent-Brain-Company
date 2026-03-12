@@ -19,11 +19,22 @@ Each department planning agent returns:
       "assumptions": ["string"],
       "rationale": "string",
       "implementation_steps": ["string"],
-      "success_metrics": ["string"]
+      "success_metrics": ["string"],
+      "artifacts": {
+        "department_specific_key": "value"
+      }
     }
   ]
 }
 ```
+
+## Department Artifact Keys
+
+- hardware: bom_targets, manufacturing_notes, certification_path, supply_chain_risks
+- software: interface_boundaries, system_components, data_flows, operational_risks
+- design: design_constraints, ergonomic_targets, safety_cues, serviceability_rules
+- marketing: channel_budget, wedge_segments, launch_narrative, partnership_plan
+- finance: capital_envelope, pricing_logic, unit_economics, downside_controls
 
 ## Research Contract
 
@@ -56,6 +67,9 @@ Each department planning agent returns:
 {
   "reply": "string",
   "follow_up_questions": ["string"],
-  "updated_assumptions": ["string"]
+  "updated_assumptions": ["string"],
+  "suggested_stage": "string",
+  "suggested_impact": "string",
+  "can_promote_to_intervention": true
 }
 ```

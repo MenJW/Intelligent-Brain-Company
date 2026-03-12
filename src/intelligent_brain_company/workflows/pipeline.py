@@ -105,6 +105,13 @@ class CompanyPipeline:
                 lines.append(f"- Rationale: {solution.rationale}")
             if solution.success_metrics:
                 lines.append(f"- Success metrics: {'; '.join(solution.success_metrics)}")
+            if solution.artifacts:
+                for key, value in solution.artifacts.items():
+                    if isinstance(value, list):
+                        rendered = '; '.join(str(item) for item in value)
+                    else:
+                        rendered = str(value)
+                    lines.append(f"- {key.replace('_', ' ').title()}: {rendered}")
             lines.append("")
         lines.append("## Board Decision")
         lines.append("")
@@ -216,6 +223,7 @@ class CompanyPipeline:
             ("C", "higher-upside and more differentiated", 1),
         )
         for suffix, variant, delta in patterns:
+            artifacts = self._default_artifacts_for_department(department, suffix)
             solutions.append(
                 DepartmentSolution(
                     department=department,
@@ -234,9 +242,48 @@ class CompanyPipeline:
                         "Pilot milestones hit on time.",
                         "Cost envelope remains within target.",
                     ],
+                    artifacts=artifacts,
                 )
             )
         return solutions
+
+    def _default_artifacts_for_department(self, department: Department, suffix: str) -> dict[str, object]:
+        if department == Department.HARDWARE:
+            return {
+                "bom_targets": [f"core powertrain tier {suffix}", "frame and chassis cost guardrail", "battery pack sourcing envelope"],
+                "manufacturing_notes": ["prototype with modular assembly", "keep tooling low for pilot run"],
+                "certification_path": "validate local compliance before volume tooling",
+                "supply_chain_risks": ["battery lead time", "motor controller dual sourcing"],
+            }
+        if department == Department.SOFTWARE:
+            return {
+                "interface_boundaries": ["vehicle control API", "telemetry ingestion API", "operator app service boundary"],
+                "system_components": ["embedded controller", "fleet service", "operator dashboard"],
+                "data_flows": ["vehicle to telemetry", "dashboard to diagnostics", "operator app to alerts"],
+                "operational_risks": ["firmware upgrade rollback", "weak offline mode"],
+            }
+        if department == Department.DESIGN:
+            return {
+                "design_constraints": ["easy ingress and egress", "tool-free service access", "high visual trust"],
+                "ergonomic_targets": ["reduced lifting strain", "clear control reach"],
+                "safety_cues": ["visible braking intent", "battery status visibility"],
+                "serviceability_rules": ["replaceable outer panels", "fast battery access"],
+            }
+        if department == Department.MARKETING:
+            return {
+                "channel_budget": ["dealer enablement 40%", "field demos 35%", "digital acquisition 25%"],
+                "wedge_segments": ["local merchants", "last-mile service fleets"],
+                "launch_narrative": "lower operating cost with practical reliability",
+                "partnership_plan": ["regional dealers", "battery service partners"],
+            }
+        if department == Department.FINANCE:
+            return {
+                "capital_envelope": ["prototype budget cap", "pilot batch reserve", "working capital buffer"],
+                "pricing_logic": "target rapid payback for small fleet operators",
+                "unit_economics": ["gross margin after pilot", "service revenue attachment"],
+                "downside_controls": ["stage-gated spend", "supplier payment controls"],
+            }
+        return {}
 
     def _run_roundtables(
         self,

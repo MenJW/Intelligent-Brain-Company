@@ -42,6 +42,10 @@ class AppConfig:
     def tasks_dir(self) -> Path:
         return self.data_dir / "tasks"
 
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "ibc.sqlite3"
+
     def ensure_directories(self) -> None:
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self.tasks_dir.mkdir(parents=True, exist_ok=True)

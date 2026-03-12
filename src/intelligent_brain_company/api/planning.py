@@ -244,8 +244,16 @@ def post_project_chat(project_id: str):
     if project is None:
         return jsonify({"success": False, "error": "project not found"}), 404
 
-    reply, used_llm = chat_agent.reply(project, agent, message)
-    turn = project.append_conversation(agent=agent, user_message=message, assistant_message=reply, used_llm=used_llm)
+    reply, used_llm, suggested_stage, suggested_impact, can_promote = chat_agent.reply(project, agent, message)
+    turn = project.append_conversation(
+        agent=agent,
+        user_message=message,
+        assistant_message=reply,
+        used_llm=used_llm,
+        suggested_stage=suggested_stage,
+        suggested_impact=suggested_impact,
+        can_promote_to_intervention=can_promote,
+    )
     project_store.save_project(project)
     return jsonify(
         {
@@ -257,3 +265,60 @@ def post_project_chat(project_id: str):
             },
         }
     )
+
+
+@planning_bp.route("/api/projects/<project_id>/chat/promote", methods=["POST"])
+def promote_chat_to_intervention(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    turn_id = payload.get("turn_id")
+    if not turn_id:
+        return jsonify({"success": False, "error": "turn_id is required"}), 400
+
+    project_store = current_app.extensions["project_store"]
+    task_store = current_app.extensions["task_store"]
+    orchestrator = current_app.extensions["planning_orchestrator"]
+    project = project_store.get_project(project_id)
+    if project is None:
+        return jsonify({"success": False, "error": "project not found"}), 404
+
+    turn = project.find_turn(turn_id)
+    if turn is None:
+        return jsonify({"success": False, "error": "turn not found"}), 404
+    if not turn.can_promote_to_intervention:
+        return jsonify({"success": False, "error": "turn cannot be promoted"}), 400
+
+    intervention = UserIntervention(
+        stage=Stage(payload.get("stage", turn.suggested_stage)),
+        speaker=payload.get("speaker", turn.agent),
+        message=turn.user_message,
+        impact=payload.get("impact", turn.suggested_impact),
+    )
+    project.add_intervention(intervention)
+    project_store.save_project(project)
+
+    task = TaskRecord.create(kind="promote_chat_to_intervention", project_id=project_id)
+    task.mark_running()
+    task_store.save_task(task)
+
+    try:
+        plan = orchestrator.build_plan(project.idea, project.interventions)
+        markdown = orchestrator.render_plan(plan)
+        version = project.register_plan(plan, markdown)
+        project_store.save_project(project)
+        task.mark_completed({"project_id": project_id, "version_id": version.version_id, "turn_id": turn.turn_id})
+        task_store.save_task(task)
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "task": task.to_dict(),
+                    "project": project.to_dict(),
+                    "latest_plan": version.to_dict(),
+                    "promoted_turn": turn.to_dict(),
+                },
+            }
+        )
+    except Exception as exc:
+        task.mark_failed(str(exc))
+        task_store.save_task(task)
+        return jsonify({"success": False, "error": str(exc), "task": task.to_dict()}), 500

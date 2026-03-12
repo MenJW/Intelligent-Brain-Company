@@ -9,6 +9,7 @@ from intelligent_brain_company.domain.models import (
     DepartmentSolution,
     IdeaBrief,
     ResearchAssessment,
+    Stage,
     UserIntervention,
 )
 from intelligent_brain_company.domain.project_state import ProjectRecord
@@ -28,6 +29,19 @@ def _department_context(solutions: dict[Department, DepartmentSolution] | None =
     for department, solution in solutions.items():
         lines.append(f"- {department.value}: {solution.name} | {solution.summary}")
     return "\n".join(lines)
+
+
+def _suggested_stage_for_agent(agent_key: str) -> str:
+    mapping = {
+        "research": Department.RESEARCH.value,
+        "hardware": Stage.DEPARTMENT_DESIGN.value,
+        "software": Stage.DEPARTMENT_DESIGN.value,
+        "design": Stage.DEPARTMENT_DESIGN.value,
+        "marketing": Stage.DEPARTMENT_DESIGN.value,
+        "finance": Stage.DEPARTMENT_DESIGN.value,
+        "board": Stage.BOARD.value,
+    }
+    return mapping.get(agent_key, Stage.RESEARCH.value)
 
 
 @dataclass(slots=True)
@@ -139,7 +153,8 @@ class DepartmentAgent:
             f"Idea summary: {brief.summary or 'N/A'}\n"
             f"Constraints and intervention impact: {_constraints_text(brief, interventions)}\n"
             f"Success metrics: {', '.join(brief.success_metrics) or 'N/A'}\n"
-            "Return practical, differentiated options with realistic execution tradeoffs."
+            "Return practical, differentiated options with realistic execution tradeoffs. "
+            "Make artifacts specific and actionable rather than generic labels."
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt)
         if not data:
@@ -151,14 +166,14 @@ class DepartmentAgent:
 class ChatAgent:
     llm_client: LLMClient | None = None
 
-    def reply(self, project: ProjectRecord, agent_key: str, message: str) -> tuple[str, bool]:
+    def reply(self, project: ProjectRecord, agent_key: str, message: str) -> tuple[str, bool, str, str, bool]:
         fallback = self._fallback_reply(project, agent_key, message)
         if self.llm_client is None:
-            return fallback, False
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
 
         system_prompt = (
             "You are an internal expert inside an AI-native company. "
-            "Return strict JSON with keys: reply, follow_up_questions, updated_assumptions. "
+            "Return strict JSON with keys: reply, follow_up_questions, updated_assumptions, suggested_stage, suggested_impact, can_promote_to_intervention. "
             "Be concise and operational."
         )
         user_prompt = (
@@ -173,7 +188,7 @@ class ChatAgent:
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt, temperature=0.4)
         if not data:
-            return fallback, False
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
         try:
             reply = str(data["reply"])
             follow_ups = [str(item) for item in data.get("follow_up_questions", [])]
@@ -183,9 +198,20 @@ class ChatAgent:
                 suffix.append("后续问题: " + " | ".join(follow_ups[:2]))
             if assumptions:
                 suffix.append("更新假设: " + " | ".join(assumptions[:2]))
-            return (reply + ("\n\n" + "\n".join(suffix) if suffix else ""), True)
+            suggested_stage = str(data.get("suggested_stage", _suggested_stage_for_agent(agent_key)))
+            suggested_impact = str(data.get("suggested_impact", "revise downstream conclusions"))
+            can_promote = bool(data.get("can_promote_to_intervention", True))
+            response_text = reply + ("\n\n" + "\n".join(suffix) if suffix else "")
+            return (response_text, True, suggested_stage, suggested_impact, can_promote)
         except (KeyError, TypeError, ValueError):
-            return fallback, False
+            return fallback, False, _suggested_stage_for_agent(agent_key), self._default_impact(agent_key), True
+
+    def _default_impact(self, agent_key: str) -> str:
+        if agent_key == "board":
+            return "调整董事会约束条件并重新审核批准结论"
+        if agent_key == "research":
+            return "重新校准目标用户、竞争对照和需求验证结论"
+        return f"更新 {agent_key} 部门方案假设和交付边界"
 
     def _fallback_reply(self, project: ProjectRecord, agent_key: str, message: str) -> str:
         if agent_key == Department.RESEARCH.value and project.latest_plan:
@@ -193,14 +219,16 @@ class ChatAgent:
             return (
                 f"研究组当前判断是：{research.recommendation}。"
                 f"主要风险包括：{'；'.join(research.key_risks[:3])}。"
-                f"结合你的问题“{message}”，建议先补强需求验证和竞争对照。"
+                f"结合你的问题“{message}”，建议先补强需求验证和竞争对照。\n\n"
+                f"建议干预阶段: {Stage.RESEARCH.value}\n建议影响: 重新校准目标用户、竞争对照和需求验证结论"
             )
         if agent_key == "board" and project.latest_plan:
             board = project.latest_plan.board_decision
             return (
                 f"董事会当前结论是：{'批准' if board.approved else '暂缓'}。"
                 f"理由：{board.rationale}。"
-                f"当前条件：{'；'.join(board.conditions[:3])}。"
+                f"当前条件：{'；'.join(board.conditions[:3])}。\n\n"
+                f"建议干预阶段: {Stage.BOARD.value}\n建议影响: 调整董事会约束条件并重新审核批准结论"
             )
         try:
             department = Department(agent_key)
@@ -213,6 +241,7 @@ class ChatAgent:
                 f"{department.value} 部门当前主推方案是 {solution.name}。"
                 f"摘要：{solution.summary}。"
                 f"关键假设：{'；'.join(solution.assumptions[:3]) or '暂无'}。"
-                f"对于你的问题“{message}”，建议围绕该方案的可行性和依赖关系继续细化。"
+                f"对于你的问题“{message}”，建议围绕该方案的可行性和依赖关系继续细化。\n\n"
+                f"建议干预阶段: {Stage.DEPARTMENT_DESIGN.value}\n建议影响: 更新 {department.value} 部门方案假设和交付边界"
             )
         return f"{department.value} 部门尚未形成已选方案。你的问题“{message}”已纳入后续评估。"
