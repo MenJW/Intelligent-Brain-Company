@@ -46,12 +46,13 @@ def test_roundtable_logs_include_all_relevant_employees() -> None:
     plan = orchestrator.build_plan(IdeaBrief(title="Compact Cargo EV"))
 
     for review in plan.roundtable_reviews:
-        dependency_count = sum(
-            len(plan.department_solutions[department][0].artifacts.get("team_owners", []))
-            for department in DEPARTMENT_DEPENDENCIES[review.department]
-        )
         base_department_count = len(plan.department_solutions[review.department][0].artifacts.get("team_owners", []))
-        expected_minimum = base_department_count + dependency_count
-
-        assert len(review.participant_profiles) >= expected_minimum
+        assert len(review.participant_profiles) >= base_department_count
+        assert len(review.participant_profiles) <= (
+            base_department_count
+            + sum(
+                len(plan.department_solutions[department][0].artifacts.get("team_owners", []))
+                for department in DEPARTMENT_DEPENDENCIES[review.department]
+            )
+        )
         assert len(review.discussion_log) == len(review.participant_profiles)

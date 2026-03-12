@@ -25,6 +25,21 @@ const generatePlanButton = document.getElementById('generate-plan')
 const submitInterventionButton = document.getElementById('submit-intervention')
 const loadDiffButton = document.getElementById('load-diff')
 
+const NEXT_STAGE_ACTION = {
+  intake: '执行研究阶段',
+  research: '执行部门评审',
+  department_design: '执行跨部门评审',
+  roundtable: '执行方案综合',
+  synthesis: '执行董事会评审',
+  board: '已完成全部环节',
+}
+
+function updateGenerateButton(project) {
+  const action = NEXT_STAGE_ACTION[project.current_stage] || '执行下一环节'
+  generatePlanButton.textContent = action
+  generatePlanButton.disabled = project.current_stage === 'board'
+}
+
 const DEMO_PROJECTS = [
   {
     title: 'AI 面试训练教练',
@@ -67,7 +82,7 @@ function showProject(project) {
     : `${project.status} · ${project.current_stage} · ${project.plans.length} 个版本`
   planMarkdown.textContent = project.latest_plan_markdown || '尚未生成计划。'
   renderScorecard(project.latest_plan?.scorecard || null)
-  generatePlanButton.disabled = false
+  updateGenerateButton(project)
   submitInterventionButton.disabled = false
   sendChatButton.disabled = false
   refreshChatButton.disabled = false
@@ -315,11 +330,15 @@ document.getElementById('create-project-form').addEventListener('submit', async 
 
 generatePlanButton.addEventListener('click', async () => {
   if (!state.activeProject) return
+  projectMeta.textContent = '正在执行下一环节...'
   const data = await api('/api/planning/generate', {
     method: 'POST',
     body: JSON.stringify({ project_id: state.activeProject.project_id }),
   })
   showProject(data.project)
+  if (data.executed_stage) {
+    projectMeta.textContent = `${data.project.status} · ${data.project.current_stage} · 已执行环节 ${data.executed_stage}`
+  }
   await loadProjects()
 })
 

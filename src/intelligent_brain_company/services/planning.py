@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from intelligent_brain_company.agents.runtime import BoardAgent, DepartmentAgent, ResearchAgent
 from intelligent_brain_company.config import AppConfig
-from intelligent_brain_company.domain.models import Department, IdeaBrief, ProjectPlan, UserIntervention
+from intelligent_brain_company.domain.models import Department, IdeaBrief, ProjectPlan, Stage, UserIntervention
 from intelligent_brain_company.services.llm_client import LLMClient
 from intelligent_brain_company.workflows.pipeline import CompanyPipeline
 
@@ -40,3 +40,6 @@ class PlanningOrchestrator:
 
     def render_plan(self, plan: ProjectPlan) -> str:
         return self.pipeline.render_markdown(plan)
+
+    def render_stage(self, plan: ProjectPlan, stage: Stage) -> str:
+        return self.pipeline.render_stage_markdown(plan, stage)

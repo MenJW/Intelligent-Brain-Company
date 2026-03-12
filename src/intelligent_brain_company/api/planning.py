@@ -29,16 +29,39 @@ def generate_plan():
     task_store.save_task(task)
 
     try:
+        next_stage = project.next_stage_to_run()
+        if next_stage is None:
+            task.mark_completed({"project_id": project_id, "message": "all stages completed"})
+            task_store.save_task(task)
+            return jsonify(
+                {
+                    "success": True,
+                    "data": {
+                        "task": task.to_dict(),
+                        "project": project.to_dict(),
+                        "latest_plan": project.plans[-1].to_dict() if project.plans else None,
+                        "executed_stage": None,
+                        "has_next_stage": False,
+                    },
+                }
+            )
+
         project.status = ProjectStatus.PLANNING
         project.touch()
         project_store.save_project(project)
 
         plan = orchestrator.build_plan(project.idea, project.interventions)
-        markdown = orchestrator.render_plan(plan)
-        version = project.register_plan(plan, markdown)
+        markdown = orchestrator.render_stage(plan, next_stage)
+        version = project.register_stage_snapshot(plan, markdown, next_stage)
         project_store.save_project(project)
 
-        task.mark_completed({"project_id": project_id, "version_id": version.version_id})
+        task.mark_completed(
+            {
+                "project_id": project_id,
+                "version_id": version.version_id,
+                "executed_stage": next_stage.value,
+            }
+        )
         task_store.save_task(task)
         return jsonify(
             {
@@ -47,6 +70,8 @@ def generate_plan():
                     "task": task.to_dict(),
                     "project": project.to_dict(),
                     "latest_plan": version.to_dict(),
+                    "executed_stage": next_stage.value,
+                    "has_next_stage": project.next_stage_to_run() is not None,
                 },
             }
         )

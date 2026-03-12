@@ -33,6 +33,8 @@ def test_create_project_and_generate_plan(tmp_path: Path) -> None:
     assert generation.status_code == 200
     payload = generation.get_json()["data"]
     assert payload["task"]["status"] == "completed"
+    assert payload["executed_stage"] == "research"
+    assert payload["project"]["current_stage"] == "research"
     assert payload["project"]["latest_plan_markdown"]
     assert payload["project"]["latest_plan"]["scorecard"]["recommendation"] in {"Go", "Maybe", "No-Go"}
     first_roundtable = payload["project"]["latest_plan"]["roundtable_reviews"][0]

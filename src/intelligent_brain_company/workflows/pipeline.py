@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from statistics import mean
 
 from intelligent_brain_company.agents.registry import AgentProfile, department_teams
@@ -179,6 +180,94 @@ class CompanyPipeline:
                     f"- {intervention.stage.value}: {intervention.speaker} said '{intervention.message}' and expected '{intervention.impact}'."
                 )
         return "\n".join(lines)
+
+    def render_stage_markdown(self, plan: ProjectPlan, stage: Stage) -> str:
+        if stage == Stage.RESEARCH:
+            lines = [
+                f"# Stage Output: {stage.value}",
+                "",
+                "## Research Assessment",
+                "",
+                f"- Customer segments: {', '.join(plan.research.customer_segments)}",
+                f"- Market view: {plan.research.market_size_view}",
+                f"- Competition: {plan.research.competitive_landscape}",
+                f"- Key risks: {'; '.join(plan.research.key_risks)}",
+                f"- Recommendation: {plan.research.recommendation}",
+            ]
+            return "\n".join(lines)
+
+        if stage == Stage.DEPARTMENT_DESIGN:
+            lines = [
+                f"# Stage Output: {stage.value}",
+                "",
+                "## Department Discussions",
+                "",
+            ]
+            for department, solutions in plan.department_solutions.items():
+                lines.append(f"### {department.value.title()}")
+                owners = solutions[0].artifacts.get("team_owners", []) if solutions else []
+                if owners:
+                    lines.append(f"- Team: {'; '.join(str(item) for item in owners)}")
+                for solution in solutions:
+                    lines.append(
+                        f"- {solution.name}: {solution.summary} (score {solution.feasibility_score}/10)"
+                    )
+                lines.append("")
+            return "\n".join(lines)
+
+        if stage == Stage.ROUNDTABLE:
+            lines = [
+                f"# Stage Output: {stage.value}",
+                "",
+                "## Cross-Department Roundtable",
+                "",
+            ]
+            for review in plan.roundtable_reviews:
+                lines.append(f"### {review.department.value.title()} - {review.solution_name}")
+                lines.append(f"- Decision: {review.decision}")
+                if review.participant_profiles:
+                    lines.append(
+                        f"- Responding participants: {', '.join(str(item.get('name')) for item in review.participant_profiles)}"
+                    )
+                if review.discussion_log:
+                    lines.append("- Discussion:")
+                    for turn in review.discussion_log:
+                        lines.append(f"  - {turn}")
+                lines.append("")
+            return "\n".join(lines)
+
+        if stage == Stage.SYNTHESIS:
+            lines = [
+                f"# Stage Output: {stage.value}",
+                "",
+                "## Selected Solution Synthesis",
+                "",
+            ]
+            for department, solution in plan.selected_solutions.items():
+                lines.append(f"- {department.value}: {solution.name} | {solution.summary}")
+            return "\n".join(lines)
+
+        if stage == Stage.BOARD:
+            lines = [
+                f"# Stage Output: {stage.value}",
+                "",
+                "## Board Decision",
+                "",
+                f"- Approved: {'yes' if plan.board_decision.approved else 'no'}",
+                f"- Difficulty: {plan.board_decision.development_difficulty}",
+                f"- Budget outlook: {plan.board_decision.budget_outlook}",
+                f"- Funding cycle: {plan.board_decision.funding_cycle}",
+                f"- Rationale: {plan.board_decision.rationale}",
+                f"- Conditions: {'; '.join(plan.board_decision.conditions)}",
+                "",
+                "## Scorecard",
+                "",
+                f"- Recommendation: {plan.scorecard.recommendation if plan.scorecard else 'N/A'}",
+                f"- Summary: {plan.scorecard.summary if plan.scorecard else 'N/A'}",
+            ]
+            return "\n".join(lines)
+
+        return self.render_markdown(plan)
 
     def _build_default_research(
         self,
@@ -375,7 +464,8 @@ class CompanyPipeline:
                 ]
                 if self._has_stage_intervention(interventions, Stage.ROUNDTABLE):
                     concerns.append("User intervention requires explicit revalidation of tradeoffs.")
-                participant_profiles = self._build_participant_profiles(teams, self._solution_team_departments(solution))
+                all_participants = self._build_participant_profiles(teams, self._solution_team_departments(solution))
+                participant_profiles = self._select_relevant_participants(solution, all_participants)
                 discussion_log = self._build_roundtable_discussion(solution, participant_profiles)
                 reviews.append(
                     RoundtableReview(
@@ -421,6 +511,61 @@ class CompanyPipeline:
                     }
                 )
         return participants
+
+    def _select_relevant_participants(
+        self,
+        solution: DepartmentSolution,
+        participants: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        solution_text = self._solution_text_blob(solution)
+        selected: list[dict[str, object]] = []
+        for member in participants:
+            member_department = str(member.get("department", ""))
+            if member_department == solution.department.value:
+                selected.append(member)
+                continue
+            if self._capability_matches_solution(solution_text, member.get("capability_focus", [])):
+                selected.append(member)
+        return selected
+
+    def _solution_text_blob(self, solution: DepartmentSolution) -> str:
+        parts: list[str] = [solution.name, solution.summary, solution.rationale]
+        parts.extend(solution.assumptions)
+        parts.extend(solution.implementation_steps)
+        parts.extend(solution.success_metrics)
+        parts.extend(item.value for item in solution.dependencies)
+        for key, value in solution.artifacts.items():
+            parts.append(str(key))
+            if isinstance(value, list):
+                parts.extend(str(item) for item in value)
+            else:
+                parts.append(str(value))
+        return " ".join(parts).lower()
+
+    def _capability_matches_solution(self, solution_text: str, capability_focus: object) -> bool:
+        if not isinstance(capability_focus, list):
+            return False
+        stop_words = {
+            "and",
+            "for",
+            "with",
+            "from",
+            "into",
+            "over",
+            "under",
+            "across",
+            "design",
+            "strategy",
+            "analysis",
+            "management",
+        }
+        for phrase in capability_focus:
+            for token in re.split(r"[^a-z0-9]+", str(phrase).lower()):
+                if len(token) < 5 or token in stop_words:
+                    continue
+                if token in solution_text:
+                    return True
+        return False
 
     def _build_roundtable_discussion(
         self,

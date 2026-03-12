@@ -151,6 +151,14 @@ STAGE_SEQUENCE = [
     Stage.BOARD,
 ]
 
+PLANNING_EXECUTION_SEQUENCE = [
+    Stage.RESEARCH,
+    Stage.DEPARTMENT_DESIGN,
+    Stage.ROUNDTABLE,
+    Stage.SYNTHESIS,
+    Stage.BOARD,
+]
+
 
 @dataclass(slots=True)
 class PlanVersion:
@@ -208,23 +216,44 @@ class ProjectRecord:
     def touch(self) -> None:
         self.updated_at = utc_now()
 
-    def register_plan(self, plan: ProjectPlan, markdown: str) -> PlanVersion:
-        summary = plan.board_decision.rationale
+    def next_stage_to_run(self) -> Stage | None:
+        if self.current_stage == Stage.INTAKE:
+            return Stage.RESEARCH
+        try:
+            index = PLANNING_EXECUTION_SEQUENCE.index(self.current_stage)
+        except ValueError:
+            return Stage.RESEARCH
+        if index >= len(PLANNING_EXECUTION_SEQUENCE) - 1:
+            return None
+        return PLANNING_EXECUTION_SEQUENCE[index + 1]
+
+    def register_stage_snapshot(self, plan: ProjectPlan, markdown: str, stage: Stage) -> PlanVersion:
+        summary = (
+            plan.board_decision.rationale
+            if stage == Stage.BOARD
+            else f"{stage.value.replace('_', ' ').title()} output generated"
+        )
         plan_version = PlanVersion(
             version_id=f"plan_{uuid4().hex[:12]}",
             created_at=utc_now(),
-            stage=Stage.BOARD,
+            stage=stage,
             summary=summary,
             markdown=markdown,
-            approved=plan.board_decision.approved,
+            approved=plan.board_decision.approved if stage == Stage.BOARD else False,
         )
         self.latest_plan = plan
         self.latest_plan_markdown = markdown
         self.plans.append(plan_version)
-        self.current_stage = Stage.BOARD
-        self.status = ProjectStatus.COMPLETED if plan.board_decision.approved else ProjectStatus.REVIEWING
+        self.current_stage = stage
+        if stage == Stage.BOARD:
+            self.status = ProjectStatus.COMPLETED if plan.board_decision.approved else ProjectStatus.REVIEWING
+        else:
+            self.status = ProjectStatus.PLANNING
         self.touch()
         return plan_version
+
+    def register_plan(self, plan: ProjectPlan, markdown: str) -> PlanVersion:
+        return self.register_stage_snapshot(plan=plan, markdown=markdown, stage=Stage.BOARD)
 
     def add_intervention(self, intervention: UserIntervention) -> None:
         self.interventions.append(intervention)
@@ -274,21 +303,17 @@ class ProjectRecord:
         return None
 
     def build_stage_progress(self) -> list[dict[str, Any]]:
-        if self.status == ProjectStatus.REVIEWING and self.current_stage != Stage.BOARD:
-            current_index = STAGE_SEQUENCE.index(self.current_stage)
-        elif self.latest_plan:
-            current_index = len(STAGE_SEQUENCE) - 1
-        else:
-            current_index = STAGE_SEQUENCE.index(self.current_stage)
+        current_index = STAGE_SEQUENCE.index(self.current_stage)
 
         result: list[dict[str, Any]] = []
         for index, stage in enumerate(STAGE_SEQUENCE):
-            if self.status != ProjectStatus.REVIEWING and self.latest_plan:
-                status = "completed"
-            elif index < current_index:
+            if index < current_index:
                 status = "completed"
             elif index == current_index:
-                status = "current"
+                if stage == Stage.BOARD and self.status == ProjectStatus.COMPLETED:
+                    status = "completed"
+                else:
+                    status = "current"
             else:
                 status = "pending"
             result.append(
