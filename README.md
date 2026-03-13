@@ -1,4 +1,4 @@
-# Intelligent Brain Company
+# TOBECEO
 
 An AI boardroom for startup ideas.
 
@@ -17,7 +17,7 @@ Turn one raw idea into a structured company decision flow:
 
 Most AI tools give you one polished answer.
 
-Intelligent Brain Company gives you a process:
+TOBECEO gives you a process:
 
 1. Research
 2. Department plans
@@ -62,7 +62,7 @@ python -m pip install -e .[dev]
 ### 2. Run API + Console
 
 ```bash
-ibc-api
+tobeceo-api
 ```
 
 Open:
@@ -73,7 +73,7 @@ Open:
 ### 3. Run CLI
 
 ```bash
-ibc-plan "AI copilot for independent gyms" \
+tobeceo-plan "AI copilot for independent gyms" \
   --summary "Help gym owners automate retention and upsell workflows." \
   --constraint "Keep CAC under control" \
   --metric "Monthly retention > 90%"
@@ -161,21 +161,7 @@ Without LLM config, the app still runs in deterministic demo mode.
 
 ## Deploy
 
-This repo includes Render deployment support:
-
-- `render.yaml`
-- WSGI entrypoint at `src/intelligent_brain_company/wsgi.py`
-
-See detailed notes in `docs/deployment.md`.
-
----
-
-## Docs
-
-- `docs/architecture.md`
-- `docs/agent-contracts.md`
-- `docs/evaluation-rubric.md`
-- `docs/execution-plan.md`
+This repo includes Render deployment support via `render.yaml`.
 
 ---
 

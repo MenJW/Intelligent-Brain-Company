@@ -8,7 +8,7 @@ from intelligent_brain_company.services.planning import PlanningOrchestrator
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ibc-plan",
+        prog="tobeceo-plan",
         description="Generate a draft company-style execution plan from an idea.",
     )
     parser.add_argument("idea", help="Short project or business idea title.")

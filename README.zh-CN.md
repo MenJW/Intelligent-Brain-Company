@@ -1,4 +1,4 @@
-# Intelligent Brain Company
+# TOBECEO
 
 把创业想法先丢进一家 AI 公司，再决定要不要真做。
 
@@ -17,7 +17,7 @@
 
 很多项目不是输在执行慢，而是输在前期判断太乐观。
 
-Intelligent Brain Company 把想法评估拆成 5 个阶段：
+TOBECEO 把想法评估拆成 5 个阶段：
 
 1. 研究
 2. 部门方案
@@ -60,7 +60,7 @@ python -m pip install -e .[dev]
 ### 2. 启动 API + 控制台
 
 ```bash
-ibc-api
+tobeceo-api
 ```
 
 打开：
@@ -71,7 +71,7 @@ ibc-api
 ### 3. 使用 CLI
 
 ```bash
-ibc-plan "面向独立健身房的 AI 增长助手" \
+tobeceo-plan "面向独立健身房的 AI 增长助手" \
   --summary "帮助老板自动化留存、复购与私域运营。" \
   --constraint "控制获客成本" \
   --metric "月留存率 > 90%"
@@ -159,21 +159,7 @@ curl "http://127.0.0.1:8000/api/projects/<PROJECT_ID>/plans/diff?from=<V1>&to=<V
 
 ## 部署
 
-仓库已包含 Render 部署配置：
-
-- `render.yaml`
-- `src/intelligent_brain_company/wsgi.py`
-
-详见 `docs/deployment.md`。
-
----
-
-## 文档
-
-- `docs/architecture.md`
-- `docs/agent-contracts.md`
-- `docs/evaluation-rubric.md`
-- `docs/execution-plan.md`
+仓库已包含 Render 部署配置：`render.yaml`。
 
 ---
 

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: intelligent-brain-company
+    name: tobeceo
     runtime: python
     plan: free
     buildCommand: pip install -e .

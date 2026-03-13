@@ -136,7 +136,7 @@ def test_console_page_is_served(tmp_path: Path) -> None:
     client = app.test_client()
     response = client.get("/")
     assert response.status_code == 200
-    assert b"Intelligent Brain Company" in response.data
+    assert b"TOBECEO" in response.data
     assert "一键体验 Demo".encode("utf-8") in response.data
 
 

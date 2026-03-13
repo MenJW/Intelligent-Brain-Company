@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "intelligent-brain-company"
+name = "tobeceo"
 version = "0.1.0"
 description = "AI-native company orchestration framework for idea evaluation and execution planning"
 readme = "README.md"
@@ -32,6 +32,8 @@ dev = [
 ]
 
 [project.scripts]
+tobeceo-plan = "intelligent_brain_company.interfaces.cli:main"
+tobeceo-api = "intelligent_brain_company.app:main"
 ibc-plan = "intelligent_brain_company.interfaces.cli:main"
 ibc-api = "intelligent_brain_company.app:main"
 
