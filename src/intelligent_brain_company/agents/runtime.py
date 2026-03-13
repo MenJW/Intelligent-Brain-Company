@@ -18,10 +18,29 @@ from intelligent_brain_company.domain.project_state import ProjectRecord
 from intelligent_brain_company.services.llm_client import LLMClient
 
 
-def _constraints_text(brief: IdeaBrief, interventions: list[UserIntervention]) -> str:
+def _constraints_text(brief: IdeaBrief, interventions: list[UserIntervention], language: str = "en-US") -> str:
     parts = list(brief.user_constraints)
     parts.extend(item.impact for item in interventions)
-    return ", ".join(parts) if parts else "speed, cost discipline, and market fit"
+    if parts:
+        return ", ".join(parts)
+    return "速度、成本纪律与市场匹配" if _is_zh(language) else "speed, cost discipline, and market fit"
+
+
+def _coerce_text_list(value: object, fallback: list[str] | None = None) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return items or list(fallback or [])
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return list(fallback or [])
+        # Prefer stronger separators to avoid breaking normal sentence commas.
+        parts = re.split(r"(?:\r?\n)+|[;；|]+", text)
+        normalized = [part.strip().lstrip("- ") for part in parts if part.strip().lstrip("- ")]
+        return normalized or [text]
+
+    return list(fallback or [])
 
 
 def _department_context(solutions: dict[Department, DepartmentSolution] | None = None) -> str:
@@ -274,18 +293,22 @@ class ResearchAgent:
         brief: IdeaBrief,
         interventions: list[UserIntervention],
         fallback: ResearchAssessment,
+        language: str = "en-US",
     ) -> ResearchAssessment:
         if self.llm_client is None:
             return fallback
 
+        resolved_language = _normalize_language(language)
+
         system_prompt = (
             "You are the head of an AI venture research team. "
-            "Return strict JSON with keys: customer_segments, market_size_view, competitive_landscape, key_risks, recommendation."
+            "Return strict JSON with keys: customer_segments, market_size_view, competitive_landscape, key_risks, recommendation. "
+            f"Always write all natural-language fields in {'Simplified Chinese' if _is_zh(resolved_language) else 'English'}."
         )
         user_prompt = (
             f"Idea title: {brief.title}\n"
             f"Idea summary: {brief.summary or 'N/A'}\n"
-            f"Constraints and intervention impact: {_constraints_text(brief, interventions)}\n"
+            f"Constraints and intervention impact: {_constraints_text(brief, interventions, resolved_language)}\n"
             f"Success metrics: {', '.join(brief.success_metrics) or 'N/A'}\n"
             "Write a grounded early-stage feasibility assessment for a multidisciplinary product company."
         )
@@ -294,10 +317,10 @@ class ResearchAgent:
             return fallback
         try:
             return ResearchAssessment(
-                customer_segments=list(data["customer_segments"]),
+                customer_segments=_coerce_text_list(data.get("customer_segments"), fallback.customer_segments),
                 market_size_view=str(data["market_size_view"]),
                 competitive_landscape=str(data["competitive_landscape"]),
-                key_risks=[str(item) for item in data["key_risks"]],
+                key_risks=_coerce_text_list(data.get("key_risks"), fallback.key_risks),
                 recommendation=str(data["recommendation"]),
             )
         except (KeyError, TypeError, ValueError):
@@ -315,9 +338,12 @@ class BoardAgent:
         selected_solutions: dict[Department, DepartmentSolution],
         interventions: list[UserIntervention],
         fallback: BoardDecision,
+        language: str = "en-US",
     ) -> BoardDecision:
         if self.llm_client is None:
             return fallback
+
+        resolved_language = _normalize_language(language)
 
         solution_lines = []
         for department, solution in selected_solutions.items():
@@ -326,14 +352,15 @@ class BoardAgent:
             )
         system_prompt = (
             "You are the board of an AI-native product company. "
-            "Return strict JSON with keys: approved, development_difficulty, budget_outlook, funding_cycle, rationale, conditions."
+            "Return strict JSON with keys: approved, development_difficulty, budget_outlook, funding_cycle, rationale, conditions. "
+            f"Always write all natural-language fields in {'Simplified Chinese' if _is_zh(resolved_language) else 'English'}."
         )
         user_prompt = (
             f"Idea: {brief.title}\n"
             f"Summary: {brief.summary or 'N/A'}\n"
             f"Research recommendation: {research.recommendation}\n"
             f"Key risks: {'; '.join(research.key_risks)}\n"
-            f"User constraints and interventions: {_constraints_text(brief, interventions)}\n"
+            f"User constraints and interventions: {_constraints_text(brief, interventions, resolved_language)}\n"
             "Selected departmental solutions:\n"
             + "\n".join(solution_lines)
             + "\nAssess whether the company should approve this plan now, considering difficulty, cost, and funding cadence."
@@ -348,7 +375,7 @@ class BoardAgent:
                 budget_outlook=str(data["budget_outlook"]),
                 funding_cycle=str(data["funding_cycle"]),
                 rationale=str(data["rationale"]),
-                conditions=[str(item) for item in data["conditions"]],
+                conditions=_coerce_text_list(data.get("conditions"), fallback.conditions),
             )
         except (KeyError, TypeError, ValueError):
             return fallback
@@ -365,9 +392,12 @@ class DepartmentAgent:
         interventions: list[UserIntervention],
         fallback: list[DepartmentSolution],
         team_members: tuple[AgentProfile, ...] = (),
+        language: str = "en-US",
     ) -> list[DepartmentSolution]:
         if self.llm_client is None:
             return fallback
+
+        resolved_language = _normalize_language(language)
 
         team_context = "\n".join(
             (
@@ -377,16 +407,22 @@ class DepartmentAgent:
             for member in team_members
         )
         system_prompt = department_contract_prompt(self.department)
+        language_instruction = (
+            "Always write all natural-language values in Simplified Chinese."
+            if _is_zh(resolved_language)
+            else "Always write all natural-language values in English."
+        )
         user_prompt = (
             f"Idea title: {brief.title}\n"
             f"Idea summary: {brief.summary or 'N/A'}\n"
-            f"Constraints and intervention impact: {_constraints_text(brief, interventions)}\n"
+            f"Constraints and intervention impact: {_constraints_text(brief, interventions, resolved_language)}\n"
             f"Success metrics: {', '.join(brief.success_metrics) or 'N/A'}\n"
             "Department employee roster (all members must contribute to the final plan):\n"
             f"{team_context or '- no explicit roster provided'}\n"
             "Return practical, differentiated options with realistic execution tradeoffs. "
             "Make artifacts specific and actionable rather than generic labels. "
-            "Add one team ownership artifact containing all roster members and their responsibility split."
+            "Add one team ownership artifact containing all roster members and their responsibility split. "
+            f"{language_instruction}"
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt)
         if not data:
@@ -449,8 +485,8 @@ class ChatAgent:
             )
         try:
             reply = str(data["reply"])
-            follow_ups = [str(item) for item in data.get("follow_up_questions", [])]
-            assumptions = [str(item) for item in data.get("updated_assumptions", [])]
+            follow_ups = _coerce_text_list(data.get("follow_up_questions"), [])
+            assumptions = _coerce_text_list(data.get("updated_assumptions"), [])
             suffix = []
             if follow_ups:
                 if _is_zh(resolved_language):

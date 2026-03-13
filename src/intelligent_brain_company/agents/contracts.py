@@ -81,6 +81,36 @@ def department_contract_prompt(department: Department) -> str:
     )
 
 
+def _coerce_text_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        parts = [item.strip().lstrip("- ") for item in text.replace("\r", "\n").replace(";", "\n").replace("；", "\n").split("\n")]
+        parsed = [item for item in parts if item]
+        return parsed or [text]
+    return []
+
+
+def _coerce_dependencies(value: Any) -> list[Department]:
+    if isinstance(value, (list, tuple, set)):
+        raw_items = value
+    elif isinstance(value, str):
+        raw_items = [item.strip() for item in value.replace("；", ",").replace(";", ",").split(",") if item.strip()]
+    else:
+        return []
+
+    result: list[Department] = []
+    for item in raw_items:
+        try:
+            result.append(Department(str(item)))
+        except ValueError:
+            continue
+    return result
+
+
 def parse_department_solutions(
     department: Department,
     data: dict[str, Any],
@@ -94,20 +124,32 @@ def parse_department_solutions(
     parsed: list[DepartmentSolution] = []
     for raw in raw_solutions[: DEPARTMENT_CONTRACTS[department].solution_count]:
         try:
+            raw_artifacts = raw.get("artifacts", {}) if isinstance(raw, dict) else {}
+            fallback_solution = fallback[len(parsed)] if len(parsed) < len(fallback) else fallback[-1]
             parsed.append(
                 DepartmentSolution(
                     department=department,
-                    name=str(raw["name"]),
-                    summary=str(raw["summary"]),
-                    feasibility_score=max(1, min(10, int(raw["feasibility_score"]))),
-                    dependencies=[Department(item) for item in raw.get("dependencies", [])],
-                    assumptions=[str(item) for item in raw.get("assumptions", [])],
-                    rationale=str(raw.get("rationale", "")),
-                    implementation_steps=[str(item) for item in raw.get("implementation_steps", [])],
-                    success_metrics=[str(item) for item in raw.get("success_metrics", [])],
-                    artifacts={key: raw.get("artifacts", {}).get(key) for key in DEPARTMENT_CONTRACTS[department].artifact_keys},
+                    name=str(raw.get("name", fallback_solution.name)),
+                    summary=str(raw.get("summary", fallback_solution.summary)),
+                    feasibility_score=max(1, min(10, int(raw.get("feasibility_score", fallback_solution.feasibility_score)))),
+                    dependencies=_coerce_dependencies(raw.get("dependencies")) or list(fallback_solution.dependencies),
+                    assumptions=_coerce_text_list(raw.get("assumptions")) or list(fallback_solution.assumptions),
+                    rationale=str(raw.get("rationale", fallback_solution.rationale)),
+                    implementation_steps=_coerce_text_list(raw.get("implementation_steps")) or list(fallback_solution.implementation_steps),
+                    success_metrics=_coerce_text_list(raw.get("success_metrics")) or list(fallback_solution.success_metrics),
+                    artifacts={
+                        key: (raw_artifacts.get(key) if raw_artifacts.get(key) is not None else fallback_solution.artifacts.get(key))
+                        for key in DEPARTMENT_CONTRACTS[department].artifact_keys
+                    },
                 )
             )
-        except (KeyError, TypeError, ValueError):
-            return fallback
-    return parsed or fallback
+        except (TypeError, ValueError):
+            continue
+
+    if not parsed:
+        return fallback
+
+    while len(parsed) < DEPARTMENT_CONTRACTS[department].solution_count and len(parsed) < len(fallback):
+        parsed.append(fallback[len(parsed)])
+
+    return parsed

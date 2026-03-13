@@ -1,6 +1,15 @@
+import pytest
+
 from intelligent_brain_company.domain.models import IdeaBrief
 from intelligent_brain_company.services.planning import PlanningOrchestrator
 from intelligent_brain_company.workflows.pipeline import DEPARTMENT_DEPENDENCIES
+
+
+@pytest.fixture(autouse=True)
+def disable_llm_env(monkeypatch):
+    monkeypatch.setenv("IBC_LLM_API_KEY", "")
+    monkeypatch.setenv("IBC_LLM_BASE_URL", "")
+    monkeypatch.setenv("IBC_LLM_MODEL", "")
 
 
 class _RoundtableLLMStub:

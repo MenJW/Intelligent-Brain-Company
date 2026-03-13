@@ -254,7 +254,12 @@ class CompanyPipeline:
         resolved_language = _normalize_language(language)
         active_interventions = interventions or []
         fallback_research = self._build_default_research(brief, active_interventions, language=resolved_language)
-        research = self.research_agent.analyze(brief, active_interventions, fallback_research)
+        research = self.research_agent.analyze(
+            brief,
+            active_interventions,
+            fallback_research,
+            language=resolved_language,
+        )
 
         needs_department_design = stage in {Stage.DEPARTMENT_DESIGN, Stage.ROUNDTABLE, Stage.SYNTHESIS, Stage.BOARD}
         needs_roundtable = stage in {Stage.ROUNDTABLE, Stage.SYNTHESIS, Stage.BOARD}
@@ -287,6 +292,7 @@ class CompanyPipeline:
                 selected_solutions,
                 active_interventions,
                 fallback_board,
+                language=resolved_language,
             )
             scorecard = self._build_scorecard(
                 brief,
@@ -579,6 +585,12 @@ class CompanyPipeline:
                         lines.append(
                             f"- {solution.name}: {solution.summary}（可行性 {solution.feasibility_score}/10）"
                         )
+                        if solution.rationale:
+                            lines.append(f"  - 方案依据: {solution.rationale}")
+                        if solution.assumptions:
+                            lines.append(f"  - 关键假设: {'；'.join(solution.assumptions[:2])}")
+                        if solution.implementation_steps:
+                            lines.append(f"  - 首要执行: {'；'.join(solution.implementation_steps[:2])}")
                     lines.append("")
                 return "\n".join(lines)
             lines = [
@@ -596,6 +608,12 @@ class CompanyPipeline:
                     lines.append(
                         f"- {solution.name}: {solution.summary} (score {solution.feasibility_score}/10)"
                     )
+                    if solution.rationale:
+                        lines.append(f"  - Rationale: {solution.rationale}")
+                    if solution.assumptions:
+                        lines.append(f"  - Key assumptions: {'; '.join(solution.assumptions[:2])}")
+                    if solution.implementation_steps:
+                        lines.append(f"  - First actions: {'; '.join(solution.implementation_steps[:2])}")
                 lines.append("")
             return "\n".join(lines)
 
@@ -876,7 +894,7 @@ class CompanyPipeline:
             ]
             agent = self.department_agents.get(department)
             resolved[department] = (
-                agent.plan(brief, interventions, enriched_fallback, team_members)
+                agent.plan(brief, interventions, enriched_fallback, team_members, language=resolved_language)
                 if agent
                 else enriched_fallback
             )

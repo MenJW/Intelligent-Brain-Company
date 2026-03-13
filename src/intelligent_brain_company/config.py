@@ -5,6 +5,29 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _load_dotenv_defaults() -> dict[str, str]:
+    """Load key-value pairs from a local .env file.
+
+    Values from real process environment still take precedence.
+    """
+    root = Path.cwd()
+    env_path = root / ".env"
+    if not env_path.exists():
+        return {}
+
+    defaults: dict[str, str] = {}
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            defaults[key] = value
+    return defaults
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     data_dir: Path
@@ -17,13 +40,17 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
-        data_dir = Path(os.getenv("IBC_DATA_DIR", ".data")).resolve()
-        host = os.getenv("IBC_HOST", "127.0.0.1")
-        port = int(os.getenv("IBC_PORT", "8000"))
-        llm_api_key = os.getenv("IBC_LLM_API_KEY", "")
-        llm_base_url = os.getenv("IBC_LLM_BASE_URL", "")
-        llm_model = os.getenv("IBC_LLM_MODEL", "")
-        llm_timeout_seconds = int(os.getenv("IBC_LLM_TIMEOUT_SECONDS", "45"))
+        dotenv_defaults = _load_dotenv_defaults()
+
+        data_dir = Path(os.getenv("IBC_DATA_DIR", dotenv_defaults.get("IBC_DATA_DIR", ".data"))).resolve()
+        host = os.getenv("IBC_HOST", dotenv_defaults.get("IBC_HOST", "127.0.0.1"))
+        port = int(os.getenv("IBC_PORT", dotenv_defaults.get("IBC_PORT", "8000")))
+        llm_api_key = os.getenv("IBC_LLM_API_KEY", dotenv_defaults.get("IBC_LLM_API_KEY", ""))
+        llm_base_url = os.getenv("IBC_LLM_BASE_URL", dotenv_defaults.get("IBC_LLM_BASE_URL", ""))
+        llm_model = os.getenv("IBC_LLM_MODEL", dotenv_defaults.get("IBC_LLM_MODEL", ""))
+        llm_timeout_seconds = int(
+            os.getenv("IBC_LLM_TIMEOUT_SECONDS", dotenv_defaults.get("IBC_LLM_TIMEOUT_SECONDS", "45"))
+        )
         return cls(
             data_dir=data_dir,
             host=host,
