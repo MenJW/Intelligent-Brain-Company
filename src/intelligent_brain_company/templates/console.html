@@ -154,6 +154,25 @@
             <div id="employee-picker-panel" class="employee-picker-panel hidden"></div>
             <button type="submit" class="primary-button" disabled id="send-chat">发送消息</button>
           </form>
+
+          <div class="section-head chat-head">
+            <h3>回放播放器</h3>
+          </div>
+          <div class="replay-toolbar">
+            <input id="replay-file" type="file" accept="application/json" hidden>
+            <button id="import-replay-demo" class="ghost-button" type="button">导入回放 Demo</button>
+            <button id="replay-play" class="ghost-button" type="button" disabled>自动播放</button>
+            <button id="replay-pause" class="ghost-button" type="button" disabled>暂停</button>
+            <button id="replay-reset" class="ghost-button" type="button" disabled>重播</button>
+            <select id="replay-speed" aria-label="Replay speed">
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+            </select>
+          </div>
+          <div id="replay-status" class="chat-status">未导入回放数据。</div>
+          <div id="replay-history" class="chat-history replay-player-history"></div>
         </section>
 
         <section class="panel timeline-panel">

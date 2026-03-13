@@ -394,8 +394,29 @@ class DepartmentAgent:
         team_members: tuple[AgentProfile, ...] = (),
         language: str = "en-US",
     ) -> list[DepartmentSolution]:
+        def _mark_source(items: list[DepartmentSolution], source: str) -> list[DepartmentSolution]:
+            marked: list[DepartmentSolution] = []
+            for item in items:
+                artifacts = dict(item.artifacts)
+                artifacts["generation_source"] = source
+                marked.append(
+                    DepartmentSolution(
+                        department=item.department,
+                        name=item.name,
+                        summary=item.summary,
+                        feasibility_score=item.feasibility_score,
+                        dependencies=list(item.dependencies),
+                        assumptions=list(item.assumptions),
+                        rationale=item.rationale,
+                        implementation_steps=list(item.implementation_steps),
+                        success_metrics=list(item.success_metrics),
+                        artifacts=artifacts,
+                    )
+                )
+            return marked
+
         if self.llm_client is None:
-            return fallback
+            return _mark_source(fallback, "fallback:no-llm")
 
         resolved_language = _normalize_language(language)
 
@@ -426,8 +447,12 @@ class DepartmentAgent:
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt)
         if not data:
-            return fallback
-        return parse_department_solutions(self.department, data, fallback)
+            return _mark_source(fallback, "fallback:no-json")
+
+        parsed = parse_department_solutions(self.department, data, fallback)
+        if parsed == fallback:
+            return _mark_source(parsed, "fallback:parse-failed")
+        return _mark_source(parsed, "llm")
 
 
 @dataclass(slots=True)

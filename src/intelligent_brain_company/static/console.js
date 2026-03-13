@@ -4,6 +4,12 @@ const state = {
   chatHistoryByProject: {},
   activeLanguage: 'zh-CN',
   employeeRosterByProjectAgent: {},
+  replayPlayer: {
+    steps: [],
+    currentIndex: -1,
+    timer: null,
+    speed: 1,
+  },
 }
 
 const DEPARTMENT_AGENTS = new Set(['hardware', 'software', 'design', 'marketing', 'finance'])
@@ -38,6 +44,16 @@ const I18N = {
     replayExporting: '正在导出回放 Demo...',
     replayExported: '回放 Demo 已下载。',
     replayExportFailed: '导出回放 Demo 失败',
+    replayImportButton: '导入回放 Demo',
+    replayPlayButton: '自动播放',
+    replayPauseButton: '暂停',
+    replayResetButton: '重播',
+    replayEmpty: '未导入回放数据。',
+    replayLoaded: '已载入 {count} 条回放步骤，开始自动播放。',
+    replayPlaying: '正在播放第 {current}/{total} 步...',
+    replayPaused: '回放已暂停。',
+    replayCompleted: '回放已完成。',
+    replayImportFailed: '导入回放 Demo 失败',
     generatedFromTurn: '已根据 {turnId} 生成新版本。',
     agentNames: {
       research: '研究组',
@@ -79,6 +95,16 @@ const I18N = {
     replayExporting: 'Exporting replay demo...',
     replayExported: 'Replay demo downloaded.',
     replayExportFailed: 'Failed to export replay demo',
+    replayImportButton: 'Import Replay Demo',
+    replayPlayButton: 'Autoplay',
+    replayPauseButton: 'Pause',
+    replayResetButton: 'Replay',
+    replayEmpty: 'No replay data imported yet.',
+    replayLoaded: 'Loaded {count} replay steps. Autoplay started.',
+    replayPlaying: 'Playing step {current}/{total}...',
+    replayPaused: 'Replay paused.',
+    replayCompleted: 'Replay completed.',
+    replayImportFailed: 'Failed to import replay demo',
     generatedFromTurn: 'Generated a new version from {turnId}.',
     agentNames: {
       research: 'Research Team',
@@ -267,6 +293,14 @@ const sendChatButton = document.getElementById('send-chat')
 const languageToggleButton = document.getElementById('language-toggle')
 const refreshChatButton = document.getElementById('refresh-chat')
 const exportReplayDemoButton = document.getElementById('export-replay-demo')
+const importReplayDemoButton = document.getElementById('import-replay-demo')
+const replayFileInput = document.getElementById('replay-file')
+const replayPlayButton = document.getElementById('replay-play')
+const replayPauseButton = document.getElementById('replay-pause')
+const replayResetButton = document.getElementById('replay-reset')
+const replaySpeedSelect = document.getElementById('replay-speed')
+const replayStatus = document.getElementById('replay-status')
+const replayHistory = document.getElementById('replay-history')
 const employeePickerToggleButton = document.getElementById('employee-picker-toggle')
 const employeePickerPanel = document.getElementById('employee-picker-panel')
 const generatePlanButton = document.getElementById('generate-plan')
@@ -365,6 +399,18 @@ function applyLanguageToChatUi() {
   if (exportReplayDemoButton) {
     exportReplayDemoButton.textContent = t('exportReplayButton')
   }
+  if (importReplayDemoButton) {
+    importReplayDemoButton.textContent = t('replayImportButton')
+  }
+  if (replayPlayButton) {
+    replayPlayButton.textContent = t('replayPlayButton')
+  }
+  if (replayPauseButton) {
+    replayPauseButton.textContent = t('replayPauseButton')
+  }
+  if (replayResetButton) {
+    replayResetButton.textContent = t('replayResetButton')
+  }
   renderEmployeePicker(chatAgentSelect.value)
   if (!state.activeProject) {
     chatStatus.textContent = t('chatReady')
@@ -461,6 +507,128 @@ function resetProjectView() {
   employeePickerPanel.innerHTML = ''
   refreshChatButton.disabled = true
   loadDiffButton.disabled = true
+}
+
+function replayStepProfile(step) {
+  const speaker = String(step.speaker || '')
+  if (step.kind === 'user_message') {
+    return { row: 'outgoing', name: t('userName'), avatar: '你', hue: 188 }
+  }
+  if (speaker === 'stage_replay' || step.kind === 'stage_output') {
+    return { row: 'incoming', name: t('stageReplayName'), avatar: '回', hue: 270 }
+  }
+  if (step.kind === 'employee_statement') {
+    const display = employeeRole(step.speaker || t('employeeFallback'), step.speaker_title)
+    return { row: 'incoming', name: display, avatar: display.slice(0, 1), hue: 94 }
+  }
+  if (step.agent && AGENT_PROFILES[step.agent]) {
+    const profile = profileByAgent(step.agent)
+    return { row: 'incoming', name: profile.name, avatar: profile.avatar, hue: profile.hue }
+  }
+  return { row: 'incoming', name: speaker || 'Agent', avatar: (speaker || 'A').slice(0, 1), hue: 210 }
+}
+
+function renderReplayPlayer() {
+  const steps = state.replayPlayer.steps
+  const currentIndex = state.replayPlayer.currentIndex
+  replayHistory.innerHTML = ''
+  if (!steps.length) {
+    replayStatus.textContent = t('replayEmpty')
+    return
+  }
+
+  const visible = steps.slice(0, Math.max(0, currentIndex + 1))
+  visible.forEach((step) => {
+    const profile = replayStepProfile(step)
+    const content = formatChatBody(step.content || '')
+    const row = document.createElement('div')
+    row.className = `chat-row ${profile.row}`
+    if (profile.row === 'outgoing') {
+      row.innerHTML = `
+        <div class="chat-bubble user">
+          <div class="chat-bubble-head">
+            <span class="chat-role">${escapeHtml(profile.name)}</span>
+            <span class="chat-time">${new Date(step.timestamp).toLocaleString()}</span>
+          </div>
+          <div class="chat-message">${content}</div>
+        </div>
+        <div class="chat-avatar" style="${avatarStyle(profile)}">${escapeHtml(profile.avatar)}</div>
+      `
+    } else {
+      row.innerHTML = `
+        <div class="chat-avatar" style="${avatarStyle(profile)}">${escapeHtml(profile.avatar)}</div>
+        <div class="chat-bubble agent">
+          <div class="chat-bubble-head">
+            <span class="chat-role">${escapeHtml(profile.name)}</span>
+            <span class="chat-time">${new Date(step.timestamp).toLocaleString()}</span>
+          </div>
+          <div class="chat-message">${content}</div>
+          <div class="chat-meta">${escapeHtml(step.kind || 'step')} · ${escapeHtml(step.stage || '')}</div>
+        </div>
+      `
+    }
+    replayHistory.appendChild(row)
+  })
+
+  replayHistory.scrollTop = replayHistory.scrollHeight
+  const current = Math.min(currentIndex + 1, steps.length)
+  if (current >= steps.length) {
+    replayStatus.textContent = t('replayCompleted')
+  } else {
+    replayStatus.textContent = t('replayPlaying', { current, total: steps.length })
+  }
+}
+
+function stopReplayAutoplay() {
+  if (state.replayPlayer.timer) {
+    window.clearInterval(state.replayPlayer.timer)
+    state.replayPlayer.timer = null
+  }
+}
+
+function replayStepForward() {
+  const steps = state.replayPlayer.steps
+  if (!steps.length) return
+  if (state.replayPlayer.currentIndex >= steps.length - 1) {
+    stopReplayAutoplay()
+    renderReplayPlayer()
+    return
+  }
+  state.replayPlayer.currentIndex += 1
+  renderReplayPlayer()
+}
+
+function startReplayAutoplay() {
+  const steps = state.replayPlayer.steps
+  if (!steps.length) return
+  stopReplayAutoplay()
+  const interval = Math.max(300, Math.floor(1200 / (state.replayPlayer.speed || 1)))
+  state.replayPlayer.timer = window.setInterval(replayStepForward, interval)
+}
+
+function updateReplayControlState() {
+  const loaded = state.replayPlayer.steps.length > 0
+  replayPlayButton.disabled = !loaded
+  replayPauseButton.disabled = !loaded
+  replayResetButton.disabled = !loaded
+}
+
+async function importReplayFromFile(file) {
+  if (!file) return
+  try {
+    const content = await file.text()
+    const data = JSON.parse(content)
+    const steps = Array.isArray(data.steps) ? data.steps : []
+    state.replayPlayer.steps = steps
+    state.replayPlayer.currentIndex = -1
+    stopReplayAutoplay()
+    updateReplayControlState()
+    replayStatus.textContent = t('replayLoaded', { count: steps.length })
+    renderReplayPlayer()
+    startReplayAutoplay()
+  } catch (error) {
+    replayStatus.textContent = `${t('replayImportFailed')}: ${error.message}`
+  }
 }
 
 const DEMO_PROJECTS = [
@@ -1032,6 +1200,31 @@ refreshChatButton.addEventListener('click', async () => {
   await loadChat(state.activeProject.project_id, chatAgentSelect.value)
 })
 exportReplayDemoButton.addEventListener('click', exportReplayDemo)
+importReplayDemoButton.addEventListener('click', () => replayFileInput.click())
+replayFileInput.addEventListener('change', async (event) => {
+  const file = event.target.files?.[0]
+  await importReplayFromFile(file)
+  event.target.value = ''
+})
+replayPlayButton.addEventListener('click', () => {
+  startReplayAutoplay()
+})
+replayPauseButton.addEventListener('click', () => {
+  stopReplayAutoplay()
+  replayStatus.textContent = t('replayPaused')
+})
+replayResetButton.addEventListener('click', () => {
+  state.replayPlayer.currentIndex = -1
+  stopReplayAutoplay()
+  renderReplayPlayer()
+  startReplayAutoplay()
+})
+replaySpeedSelect.addEventListener('change', () => {
+  state.replayPlayer.speed = Number(replaySpeedSelect.value || '1')
+  if (state.replayPlayer.timer) {
+    startReplayAutoplay()
+  }
+})
 chatAgentSelect.addEventListener('change', async () => {
   if (!state.activeProject) return
   employeePickerPanel.classList.add('hidden')
@@ -1053,3 +1246,5 @@ renderScorecard(null)
 renderLanguageButton()
 applyLanguageToStageSelector()
 renderEmployeePicker(chatAgentSelect.value)
+updateReplayControlState()
+renderReplayPlayer()

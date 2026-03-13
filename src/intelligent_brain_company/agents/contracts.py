@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import re
 from typing import Any
 
 from intelligent_brain_company.domain.models import Department, DepartmentSolution
@@ -111,34 +113,136 @@ def _coerce_dependencies(value: Any) -> list[Department]:
     return result
 
 
+_DEPARTMENT_ALIAS = {
+    "hardware": "hardware",
+    "硬件": "hardware",
+    "software": "software",
+    "软件": "software",
+    "design": "design",
+    "设计": "design",
+    "marketing": "marketing",
+    "市场": "marketing",
+    "营销": "marketing",
+    "finance": "finance",
+    "财务": "finance",
+    "research": "research",
+    "研究": "research",
+}
+
+
+def _as_json_object(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "[{":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _normalize_score(value: Any, default: int) -> int:
+    if isinstance(value, (int, float)):
+        return max(1, min(10, int(value)))
+    text = str(value or "").strip()
+    if not text:
+        return default
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return default
+    try:
+        return max(1, min(10, int(float(match.group(0)))))
+    except ValueError:
+        return default
+
+
+def _extract_solutions_container(data: Any, department: Department, depth: int = 0) -> list[Any]:
+    if depth > 4:
+        return []
+    payload = _as_json_object(data)
+
+    if isinstance(payload, list):
+        return payload
+
+    if not isinstance(payload, dict):
+        return []
+
+    # direct candidates
+    for key in ("solutions", "options", "plans", "items"):
+        if key in payload:
+            return _extract_solutions_container(payload[key], department, depth + 1)
+
+    # department keyed map
+    for dept_key, dept_value in payload.items():
+        normalized = _DEPARTMENT_ALIAS.get(str(dept_key).strip().lower())
+        if normalized == department.value:
+            return _extract_solutions_container(dept_value, department, depth + 1)
+
+    # wrapper candidates
+    for key in ("data", "result", "output", "response", "content"):
+        if key in payload:
+            nested = _extract_solutions_container(payload[key], department, depth + 1)
+            if nested:
+                return nested
+
+    # dict of named solutions
+    if payload and all(isinstance(item, dict) for item in payload.values()):
+        return list(payload.values())
+
+    return []
+
+
+def _pick(raw: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in raw and raw[key] is not None:
+            return raw[key]
+    return default
+
+
 def parse_department_solutions(
     department: Department,
     data: dict[str, Any],
     fallback: list[DepartmentSolution],
 ) -> list[DepartmentSolution]:
-    try:
-        raw_solutions = list(data["solutions"])
-    except (KeyError, TypeError, ValueError):
+    raw_solutions = _extract_solutions_container(data, department)
+    if not raw_solutions:
         return fallback
 
     parsed: list[DepartmentSolution] = []
     for raw in raw_solutions[: DEPARTMENT_CONTRACTS[department].solution_count]:
         try:
+            if isinstance(raw, str):
+                raw = _as_json_object(raw)
+            if not isinstance(raw, dict):
+                continue
             raw_artifacts = raw.get("artifacts", {}) if isinstance(raw, dict) else {}
+            if not isinstance(raw_artifacts, dict):
+                raw_artifacts = {}
             fallback_solution = fallback[len(parsed)] if len(parsed) < len(fallback) else fallback[-1]
+
+            # accept artifact keys both nested and top-level
+            merged_artifacts = dict(raw_artifacts)
+            for key in DEPARTMENT_CONTRACTS[department].artifact_keys:
+                if key not in merged_artifacts and key in raw:
+                    merged_artifacts[key] = raw[key]
+
             parsed.append(
                 DepartmentSolution(
                     department=department,
-                    name=str(raw.get("name", fallback_solution.name)),
-                    summary=str(raw.get("summary", fallback_solution.summary)),
-                    feasibility_score=max(1, min(10, int(raw.get("feasibility_score", fallback_solution.feasibility_score)))),
-                    dependencies=_coerce_dependencies(raw.get("dependencies")) or list(fallback_solution.dependencies),
-                    assumptions=_coerce_text_list(raw.get("assumptions")) or list(fallback_solution.assumptions),
-                    rationale=str(raw.get("rationale", fallback_solution.rationale)),
-                    implementation_steps=_coerce_text_list(raw.get("implementation_steps")) or list(fallback_solution.implementation_steps),
-                    success_metrics=_coerce_text_list(raw.get("success_metrics")) or list(fallback_solution.success_metrics),
+                    name=str(_pick(raw, "name", "title", "方案名", "方案", default=fallback_solution.name)),
+                    summary=str(_pick(raw, "summary", "description", "desc", "方案描述", default=fallback_solution.summary)),
+                    feasibility_score=_normalize_score(
+                        _pick(raw, "feasibility_score", "score", "feasibility", "可行性", "可行性评分", default=fallback_solution.feasibility_score),
+                        fallback_solution.feasibility_score,
+                    ),
+                    dependencies=_coerce_dependencies(_pick(raw, "dependencies", "depends_on", "依赖", default=None)) or list(fallback_solution.dependencies),
+                    assumptions=_coerce_text_list(_pick(raw, "assumptions", "hypotheses", "关键假设", default=None)) or list(fallback_solution.assumptions),
+                    rationale=str(_pick(raw, "rationale", "reason", "依据", "方案依据", default=fallback_solution.rationale)),
+                    implementation_steps=_coerce_text_list(_pick(raw, "implementation_steps", "steps", "执行步骤", "行动项", default=None)) or list(fallback_solution.implementation_steps),
+                    success_metrics=_coerce_text_list(_pick(raw, "success_metrics", "metrics", "成功指标", default=None)) or list(fallback_solution.success_metrics),
                     artifacts={
-                        key: (raw_artifacts.get(key) if raw_artifacts.get(key) is not None else fallback_solution.artifacts.get(key))
+                        key: (merged_artifacts.get(key) if merged_artifacts.get(key) is not None else fallback_solution.artifacts.get(key))
                         for key in DEPARTMENT_CONTRACTS[department].artifact_keys
                     },
                 )

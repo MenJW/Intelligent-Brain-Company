@@ -1,6 +1,6 @@
 import pytest
 
-from intelligent_brain_company.domain.models import IdeaBrief
+from intelligent_brain_company.domain.models import Department, DepartmentSolution, IdeaBrief, Stage
 from intelligent_brain_company.services.planning import PlanningOrchestrator
 from intelligent_brain_company.workflows.pipeline import DEPARTMENT_DEPENDENCIES
 
@@ -102,3 +102,35 @@ def test_roundtable_logs_fallback_when_llm_unavailable() -> None:
         assert review.discussion_log
         for line in review.discussion_log:
             assert "raised" in line
+
+
+def test_realism_calibration_penalizes_unrealistic_claims() -> None:
+    orchestrator = PlanningOrchestrator()
+    solution = DepartmentSolution(
+        department=Department.SOFTWARE,
+        name="Moonshot Stack",
+        summary="Deliver AGI with zero cost and no risk in one week.",
+        feasibility_score=9,
+        assumptions=["No constraints needed"],
+        implementation_steps=["Ship immediately"],
+    )
+    calibrated = orchestrator.pipeline._calibrate_solution_realism(  # noqa: SLF001
+        solution,
+        IdeaBrief(title="Instant AGI Product", summary="Use room-temperature superconductor and AGI"),
+        [],
+        language="en-US",
+    )
+    assert calibrated.feasibility_score <= 5
+    assert calibrated.artifacts.get("feasibility_base_score") == 9
+    penalties = calibrated.artifacts.get("feasibility_penalties")
+    assert isinstance(penalties, list)
+    assert penalties
+
+
+def test_department_stage_render_includes_rationale_and_actions() -> None:
+    orchestrator = PlanningOrchestrator()
+    plan = orchestrator.build_plan(IdeaBrief(title="Pragmatic Automation"), language="zh-CN")
+    output = orchestrator.pipeline.render_stage_markdown(plan, stage=Stage.DEPARTMENT_DESIGN, language="zh-CN")
+    assert "方案依据" in output
+    assert "首要执行" in output
+    assert "硬约束冲突解释卡片" in output

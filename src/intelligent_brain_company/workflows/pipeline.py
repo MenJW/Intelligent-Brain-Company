@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 from statistics import mean
 
@@ -35,6 +36,9 @@ LLM_ENABLED_DEPARTMENTS = (
     Department.MARKETING,
     Department.FINANCE,
 )
+
+DEPARTMENT_LLM_MAX_WORKERS = 2
+ROUNDTABLE_LLM_MAX_WORKERS = 3
 
 
 def _normalize_language(language: str | None) -> str:
@@ -327,6 +331,45 @@ class CompanyPipeline:
             conditions=[],
         )
 
+    def _feasibility_penalty_items(self, solution: DepartmentSolution) -> list[dict[str, object]]:
+        raw = solution.artifacts.get("feasibility_penalties", [])
+        if not isinstance(raw, list):
+            return []
+        items: list[dict[str, object]] = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                reason = str(entry.get("reason", "")).strip()
+                deduction = int(entry.get("deduction", 0)) if str(entry.get("deduction", "")).strip() else 0
+                if reason and deduction > 0:
+                    items.append({"reason": reason, "deduction": deduction})
+        return items
+
+    def _append_feasibility_explanation_card(self, lines: list[str], solution: DepartmentSolution, language: str) -> None:
+        penalties = self._feasibility_penalty_items(solution)
+        base_score = solution.artifacts.get("feasibility_base_score", solution.feasibility_score)
+        try:
+            base = int(base_score)
+        except (TypeError, ValueError):
+            base = solution.feasibility_score
+
+        if _is_zh(language):
+            lines.append("  - 硬约束冲突解释卡片:")
+            lines.append(f"    - 原始评分: {base}/10 -> 调整后: {solution.feasibility_score}/10")
+            if penalties:
+                for item in penalties:
+                    lines.append(f"    - 扣分 -{item['deduction']}: {item['reason']}")
+            else:
+                lines.append("    - 未发现显著硬约束冲突。")
+            return
+
+        lines.append("  - Hard-Constraint Conflict Card:")
+        lines.append(f"    - Base score: {base}/10 -> Adjusted: {solution.feasibility_score}/10")
+        if penalties:
+            for item in penalties:
+                lines.append(f"    - Deduction -{item['deduction']}: {item['reason']}")
+        else:
+            lines.append("    - No significant hard-constraint conflicts detected.")
+
     def render_markdown(self, plan: ProjectPlan, language: str = "en-US") -> str:
         resolved_language = _normalize_language(language)
         if _is_zh(resolved_language):
@@ -361,6 +404,7 @@ class CompanyPipeline:
                 lines.append(f"- 方案: {solution.name}")
                 lines.append(f"- 摘要: {solution.summary}")
                 lines.append(f"- 可行性评分: {solution.feasibility_score}/10")
+                self._append_feasibility_explanation_card(lines, solution, resolved_language)
                 if solution.assumptions:
                     lines.append(f"- 关键假设: {'；'.join(solution.assumptions)}")
                 if solution.rationale:
@@ -369,6 +413,8 @@ class CompanyPipeline:
                     lines.append(f"- 成功指标: {'；'.join(solution.success_metrics)}")
                 if solution.artifacts:
                     for key, value in solution.artifacts.items():
+                        if key in {"feasibility_base_score", "feasibility_penalties"}:
+                            continue
                         if isinstance(value, list):
                             if key == "team_owners":
                                 rendered = '；'.join(_localize_team_owner_entry(str(item), resolved_language) for item in value)
@@ -453,6 +499,7 @@ class CompanyPipeline:
             lines.append(f"- Solution: {solution.name}")
             lines.append(f"- Summary: {solution.summary}")
             lines.append(f"- Feasibility score: {solution.feasibility_score}/10")
+            self._append_feasibility_explanation_card(lines, solution, resolved_language)
             if solution.assumptions:
                 lines.append(f"- Assumptions: {'; '.join(solution.assumptions)}")
             if solution.rationale:
@@ -461,6 +508,8 @@ class CompanyPipeline:
                 lines.append(f"- Success metrics: {'; '.join(solution.success_metrics)}")
             if solution.artifacts:
                 for key, value in solution.artifacts.items():
+                    if key in {"feasibility_base_score", "feasibility_penalties"}:
+                        continue
                     if isinstance(value, list):
                         rendered = '; '.join(str(item) for item in value)
                     else:
@@ -585,6 +634,9 @@ class CompanyPipeline:
                         lines.append(
                             f"- {solution.name}: {solution.summary}（可行性 {solution.feasibility_score}/10）"
                         )
+                        source = str(solution.artifacts.get("generation_source", "unknown"))
+                        lines.append(f"  - 生成来源: {source}")
+                        self._append_feasibility_explanation_card(lines, solution, resolved_language)
                         if solution.rationale:
                             lines.append(f"  - 方案依据: {solution.rationale}")
                         if solution.assumptions:
@@ -608,6 +660,9 @@ class CompanyPipeline:
                     lines.append(
                         f"- {solution.name}: {solution.summary} (score {solution.feasibility_score}/10)"
                     )
+                    source = str(solution.artifacts.get("generation_source", "unknown"))
+                    lines.append(f"  - Generation source: {source}")
+                    self._append_feasibility_explanation_card(lines, solution, resolved_language)
                     if solution.rationale:
                         lines.append(f"  - Rationale: {solution.rationale}")
                     if solution.assumptions:
@@ -789,7 +844,7 @@ class CompanyPipeline:
                     base_name="平台方案",
                     base_summary=f"围绕 {brief.title} 设计的硬件架构，重点满足 {context}",
                     assumptions=["核心组件至少保持双供应商可得。", "原型迭代周期可控制在 12 周以内。"],
-                    base_score=8,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.SOFTWARE: self._build_solution_set(
@@ -797,7 +852,7 @@ class CompanyPipeline:
                     base_name="控制栈",
                     base_summary=f"支撑 {brief.title} 的软件控制与服务层", 
                     assumptions=["首版可选配遥测能力。", "核心控制逻辑可与用户侧系统解耦。"],
-                    base_score=7,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.DESIGN: self._build_solution_set(
@@ -805,7 +860,7 @@ class CompanyPipeline:
                     base_name="体验方案",
                     base_summary=f"与 {brief.title} 对齐的交互和产品形态决策",
                     assumptions=["用户舒适度与信任感可优先于功能数量。", "首发版本应优先保证清晰可理解。"],
-                    base_score=8,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.MARKETING: self._build_solution_set(
@@ -813,7 +868,7 @@ class CompanyPipeline:
                     base_name="市场进入",
                     base_summary=f"面向 {brief.title} 的需求启动与渠道策略",
                     assumptions=["存在可切入的楔形细分市场。", "早期合作渠道可优于纯买量获客。"],
-                    base_score=7,
+                    base_score=5,
                     language=resolved_language,
                 ),
                 Department.FINANCE: self._build_solution_set(
@@ -821,7 +876,7 @@ class CompanyPipeline:
                     base_name="资金计划",
                     base_summary=f"服务于 {brief.title} 的预算、定价与融资结构",
                     assumptions=["试点批次后单位经济性可改善。", "营运资金是早期主要财务约束。"],
-                    base_score=8,
+                    base_score=5,
                     language=resolved_language,
                 ),
             }
@@ -832,7 +887,7 @@ class CompanyPipeline:
                     base_name="Platform",
                     base_summary=f"Physical architecture for {brief.title} optimized around {context}",
                     assumptions=["Core components remain available through two suppliers.", "Prototype cycles can be completed in under 12 weeks."],
-                    base_score=8,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.SOFTWARE: self._build_solution_set(
@@ -840,7 +895,7 @@ class CompanyPipeline:
                     base_name="Control Stack",
                     base_summary=f"Digital control and service layer supporting {brief.title}",
                     assumptions=["Telemetry is optional in the first release.", "Core control logic can be isolated from user-facing software."],
-                    base_score=7,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.DESIGN: self._build_solution_set(
@@ -848,7 +903,7 @@ class CompanyPipeline:
                     base_name="Experience Concept",
                     base_summary=f"Interaction and product form decisions aligned to {brief.title}",
                     assumptions=["User comfort and trust can outweigh feature count.", "The first release should prioritize clarity over novelty."],
-                    base_score=8,
+                    base_score=6,
                     language=resolved_language,
                 ),
                 Department.MARKETING: self._build_solution_set(
@@ -856,7 +911,7 @@ class CompanyPipeline:
                     base_name="Go-To-Market",
                     base_summary=f"Demand creation and channel strategy for {brief.title}",
                     assumptions=["A clear wedge market exists.", "Partnership channels can outperform pure paid acquisition early."],
-                    base_score=7,
+                    base_score=5,
                     language=resolved_language,
                 ),
                 Department.FINANCE: self._build_solution_set(
@@ -864,12 +919,13 @@ class CompanyPipeline:
                     base_name="Capital Plan",
                     base_summary=f"Budget, pricing, and funding structure for {brief.title}",
                     assumptions=["Unit economics improve after the pilot batch.", "Working capital is the main early financial constraint."],
-                    base_score=8,
+                    base_score=5,
                     language=resolved_language,
                 ),
             }
         resolved: dict[Department, list[DepartmentSolution]] = {}
-        for department, solutions in fallback_solutions.items():
+
+        def _resolve_department(department: Department, solutions: list[DepartmentSolution]) -> tuple[Department, list[DepartmentSolution]]:
             team_members = teams.get(department, ())
             enriched_fallback = [
                 DepartmentSolution(
@@ -893,12 +949,28 @@ class CompanyPipeline:
                 for solution in solutions
             ]
             agent = self.department_agents.get(department)
-            resolved[department] = (
+            raw = (
                 agent.plan(brief, interventions, enriched_fallback, team_members, language=resolved_language)
                 if agent
                 else enriched_fallback
             )
-        return resolved
+            calibrated = [self._calibrate_solution_realism(item, brief, interventions, language=resolved_language) for item in raw]
+            return department, calibrated
+
+        max_workers = max(1, min(DEPARTMENT_LLM_MAX_WORKERS, len(fallback_solutions)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_resolve_department, department, solutions)
+                for department, solutions in fallback_solutions.items()
+            ]
+            for future in as_completed(futures):
+                department, calibrated = future.result()
+                resolved[department] = calibrated
+
+        ordered: dict[Department, list[DepartmentSolution]] = {}
+        for department in fallback_solutions.keys():
+            ordered[department] = resolved.get(department, fallback_solutions[department])
+        return ordered
 
     def _build_solution_set(
         self,
@@ -1196,16 +1268,21 @@ class CompanyPipeline:
         language: str = "en-US",
     ) -> list[str]:
         resolved_language = _normalize_language(language)
-        lines: list[str] = []
         if not participants:
-            return lines
+            return []
         focus_area = solution.success_metrics[0] if solution.success_metrics else ("交付可靠性" if _is_zh(resolved_language) else "delivery reliability")
-        for member in participants:
+
+        def _build_line(member: dict[str, object]) -> str:
             generated = self._build_roundtable_line_with_llm(solution, member, focus_area, language=resolved_language)
             if generated:
-                lines.append(generated)
-                continue
-            lines.append(self._build_roundtable_line_fallback(solution, member, focus_area, language=resolved_language))
+                return generated
+            return self._build_roundtable_line_fallback(solution, member, focus_area, language=resolved_language)
+
+        worker_cap = ROUNDTABLE_LLM_MAX_WORKERS if self.llm_client is not None else 8
+        max_workers = max(1, min(worker_cap, len(participants)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Keep output order stable by iterating over mapped results in input order.
+            lines = list(executor.map(_build_line, participants))
         return lines
 
     def _build_roundtable_line_with_llm(
@@ -1224,13 +1301,15 @@ class CompanyPipeline:
             system_prompt = (
                 "你是一名参与跨部门圆桌会的员工。"
                 "返回严格 JSON，键为 statement。"
-                "请用中文输出一条简洁、具体、可执行的发言。"
+                "请用中文输出一条更接近日常口语的发言，像同事在会上真正在说话。"
+                "允许表达担心、不同意和取舍，不要官话，不要模板句。"
             )
         else:
             system_prompt = (
                 "You are a single employee in a cross-functional roundtable. "
                 "Return strict JSON with key: statement. "
-                "Write exactly one concise statement in English, practical and specific."
+                "Write one realistic spoken statement like a teammate in a live meeting, not corporate boilerplate. "
+                "It should include a concrete concern or tradeoff and sound conversational."
             )
         user_prompt = (
             f"Employee name: {member.get('name')}\n"
@@ -1244,7 +1323,7 @@ class CompanyPipeline:
             f"Solution dependencies: {', '.join(item.value for item in solution.dependencies) or 'none'}\n"
             f"Roundtable focus to preserve: {focus_area}\n"
             "The statement should reflect this employee's personality and role, include one concrete concern "
-            "or recommendation, and reference the solution context."
+            "or recommendation, and reference the solution context. Keep it to 1-2 sentences."
         )
         data = self.llm_client.generate_json(system_prompt, user_prompt, temperature=0.5)
         if not data:
@@ -1295,9 +1374,10 @@ class CompanyPipeline:
     ) -> BoardDecision:
         resolved_language = _normalize_language(language)
         average_score = mean(solution.feasibility_score for solution in selected_solutions.values())
-        intervention_penalty = 0.5 if self._has_stage_intervention(interventions, Stage.BOARD) else 0.0
-        effective_score = average_score - intervention_penalty
-        approved = effective_score >= 7.5
+        intervention_penalty = 0.8 if self._has_stage_intervention(interventions, Stage.BOARD) else 0.0
+        hard_risk_penalty = min(1.5, len(research.key_risks) * 0.3)
+        effective_score = average_score - intervention_penalty - hard_risk_penalty
+        approved = effective_score >= 7.2 and len(research.key_risks) <= 3
 
         if _is_zh(resolved_language):
             rationale = (
@@ -1316,8 +1396,8 @@ class CompanyPipeline:
 
         return BoardDecision(
             approved=approved,
-            development_difficulty=("中" if effective_score >= 8 else "中高") if _is_zh(resolved_language) else ("medium" if effective_score >= 8 else "medium-high"),
-            budget_outlook=("分阶段交付下可控" if effective_score >= 7.5 else "对范围漂移较敏感") if _is_zh(resolved_language) else ("manageable with phased delivery" if effective_score >= 7.5 else "sensitive to scope drift"),
+            development_difficulty=("中" if effective_score >= 8 else "高") if _is_zh(resolved_language) else ("medium" if effective_score >= 8 else "high"),
+            budget_outlook=("分阶段交付下可控" if effective_score >= 7.5 else "预算压力偏高") if _is_zh(resolved_language) else ("manageable with phased delivery" if effective_score >= 7.5 else "budget pressure is high"),
             funding_cycle=("先试点投入，再按里程碑扩张") if _is_zh(resolved_language) else ("pilot funding then milestone-based expansion"),
             rationale=rationale,
             conditions=(
@@ -1346,14 +1426,14 @@ class CompanyPipeline:
     ) -> PlanScorecard:
         resolved_language = _normalize_language(language)
         average_score = mean(solution.feasibility_score for solution in selected_solutions.values())
-        intervention_penalty = min(2, len(interventions))
-        risk_penalty = min(2, len(research.key_risks) // 2)
-        constraint_bonus = 1 if brief.user_constraints else 0
+        intervention_penalty = min(3, len(interventions))
+        risk_penalty = min(3, len(research.key_risks))
+        constraint_penalty = 1 if brief.user_constraints else 0
 
-        market_demand = max(1, min(10, round(7 + constraint_bonus - risk_penalty)))
-        technical_feasibility = max(1, min(10, round(average_score)))
-        execution_complexity = max(1, min(10, round(11 - average_score + intervention_penalty)))
-        time_to_mvp = max(1, min(10, round(average_score - intervention_penalty + 1)))
+        market_demand = max(1, min(10, round(6.5 + constraint_penalty - risk_penalty * 0.7)))
+        technical_feasibility = max(1, min(10, round(average_score - risk_penalty * 0.5)))
+        execution_complexity = max(1, min(10, round(12 - average_score + intervention_penalty + risk_penalty * 0.5)))
+        time_to_mvp = max(1, min(10, round(average_score - intervention_penalty - risk_penalty * 0.4 + 0.5)))
         monetization_potential = max(1, min(10, round((market_demand + selected_solutions[Department.MARKETING].feasibility_score + selected_solutions[Department.FINANCE].feasibility_score) / 3)))
 
         weighted_score = (
@@ -1363,9 +1443,9 @@ class CompanyPipeline:
             + time_to_mvp * 0.15
             + monetization_potential * 0.15
         )
-        if weighted_score >= 7.5 and board_decision.approved:
+        if weighted_score >= 7.4 and board_decision.approved and technical_feasibility >= 7:
             recommendation = "Go"
-        elif weighted_score >= 6.2:
+        elif weighted_score >= 5.6:
             recommendation = "Maybe"
         else:
             recommendation = "No-Go"
@@ -1406,3 +1486,116 @@ class CompanyPipeline:
 
     def _has_stage_intervention(self, interventions: list[UserIntervention], stage: Stage) -> bool:
         return any(intervention.stage == stage for intervention in interventions)
+
+    def _calibrate_solution_realism(
+        self,
+        solution: DepartmentSolution,
+        brief: IdeaBrief,
+        interventions: list[UserIntervention],
+        language: str = "en-US",
+    ) -> DepartmentSolution:
+        text = " ".join(
+            [
+                brief.title,
+                brief.summary,
+                solution.name,
+                solution.summary,
+                solution.rationale,
+                *solution.assumptions,
+                *solution.implementation_steps,
+                *solution.success_metrics,
+                *brief.user_constraints,
+                *(item.impact for item in interventions),
+            ]
+        ).lower()
+
+        hard_terms = (
+            "agi",
+            "通用人工智能",
+            "可控核聚变",
+            "nuclear fusion",
+            "室温超导",
+            "room-temperature superconductor",
+            "量子瞬移",
+            "quantum teleport",
+        )
+        overpromise_terms = (
+            "zero cost",
+            "0成本",
+            "无成本",
+            "100%",
+            "零风险",
+            "no risk",
+            "immediate scale",
+            "立刻规模化",
+        )
+
+        penalty = 0
+        penalty_items: list[dict[str, object]] = []
+        if any(term in text for term in hard_terms):
+            penalty += 3
+            penalty_items.append(
+                {
+                    "deduction": 3,
+                    "reason": "出现明显超出现有工程能力的硬技术假设"
+                    if _is_zh(language)
+                    else "Contains hard-tech assumptions beyond current engineering readiness",
+                }
+            )
+        if any(term in text for term in overpromise_terms):
+            penalty += 2
+            penalty_items.append(
+                {
+                    "deduction": 2,
+                    "reason": "存在零成本/零风险/立刻规模化等过度承诺"
+                    if _is_zh(language)
+                    else "Includes overpromises like zero-cost, no-risk, or immediate scale",
+                }
+            )
+        if len(solution.dependencies) >= 3:
+            penalty += 1
+            penalty_items.append(
+                {
+                    "deduction": 1,
+                    "reason": "跨部门依赖过多，协同复杂度上升"
+                    if _is_zh(language)
+                    else "Too many cross-team dependencies increase coordination complexity",
+                }
+            )
+        if len(solution.implementation_steps) <= 1:
+            penalty += 1
+            penalty_items.append(
+                {
+                    "deduction": 1,
+                    "reason": "执行步骤过少，落地路径不充分"
+                    if _is_zh(language)
+                    else "Too few execution steps; delivery path is under-specified",
+                }
+            )
+        if not solution.assumptions:
+            penalty += 1
+            penalty_items.append(
+                {
+                    "deduction": 1,
+                    "reason": "缺少关键假设，验证边界不清晰"
+                    if _is_zh(language)
+                    else "Missing key assumptions; validation boundaries are unclear",
+                }
+            )
+
+        calibrated = max(1, min(10, solution.feasibility_score - penalty))
+        artifacts = dict(solution.artifacts)
+        artifacts["feasibility_base_score"] = solution.feasibility_score
+        artifacts["feasibility_penalties"] = penalty_items
+        return DepartmentSolution(
+            department=solution.department,
+            name=solution.name,
+            summary=solution.summary,
+            feasibility_score=calibrated,
+            dependencies=list(solution.dependencies),
+            assumptions=list(solution.assumptions),
+            rationale=solution.rationale,
+            implementation_steps=list(solution.implementation_steps),
+            success_metrics=list(solution.success_metrics),
+            artifacts=artifacts,
+        )
