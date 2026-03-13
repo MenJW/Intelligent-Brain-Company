@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from difflib import unified_diff
+from datetime import datetime, timezone
 import re
 
 from flask import current_app, jsonify, request
@@ -107,6 +108,87 @@ def _build_employee_discussion_history(project, agent: str) -> list[dict]:
                 }
             )
     return history
+
+
+def _build_replay_demo_steps(project) -> list[dict]:
+    steps: list[dict] = []
+
+    for version in project.plans:
+        steps.append(
+            {
+                "timestamp": version.created_at,
+                "kind": "stage_output",
+                "source": "stage_review",
+                "agent": "system",
+                "speaker": "stage_replay",
+                "stage": version.stage.value,
+                "content": version.markdown,
+                "version_id": version.version_id,
+                "used_llm": False,
+            }
+        )
+
+    for agent, turns in project.conversations.items():
+        for turn in turns:
+            steps.append(
+                {
+                    "timestamp": turn.created_at,
+                    "kind": "user_message",
+                    "source": "chat",
+                    "agent": agent,
+                    "speaker": "user",
+                    "stage": turn.suggested_stage,
+                    "content": turn.user_message,
+                    "turn_id": turn.turn_id,
+                    "language": turn.language,
+                    "used_llm": turn.used_llm,
+                }
+            )
+            steps.append(
+                {
+                    "timestamp": turn.created_at,
+                    "kind": "assistant_message",
+                    "source": "chat",
+                    "agent": agent,
+                    "speaker": turn.responder or agent,
+                    "stage": turn.suggested_stage,
+                    "content": turn.assistant_message,
+                    "turn_id": turn.turn_id,
+                    "language": turn.language,
+                    "used_llm": turn.used_llm,
+                    "suggested_impact": turn.suggested_impact,
+                    "can_promote_to_intervention": turn.can_promote_to_intervention,
+                }
+            )
+
+    employee_discussions = _build_employee_discussion_history(project, agent="all")
+    for item in employee_discussions:
+        steps.append(
+            {
+                "timestamp": item["created_at"],
+                "kind": "employee_statement",
+                "source": item["source"],
+                "agent": item["agent"],
+                "speaker": item.get("speaker", "employee"),
+                "speaker_title": item.get("speaker_title", ""),
+                "stage": item.get("suggested_stage", Stage.ROUNDTABLE.value),
+                "content": item.get("assistant_message", ""),
+                "turn_id": item.get("turn_id"),
+                "used_llm": False,
+            }
+        )
+
+    order = {
+        "user_message": 0,
+        "assistant_message": 1,
+        "employee_statement": 2,
+        "stage_output": 3,
+    }
+    steps.sort(key=lambda item: (item["timestamp"], order.get(item["kind"], 9)))
+    for index, item in enumerate(steps, start=1):
+        item["step_id"] = f"step_{index:04d}"
+
+    return steps
 
 
 @planning_bp.route("/api/planning/generate", methods=["POST"])
@@ -397,6 +479,31 @@ def get_project_chat(project_id: str):
             },
         }
     )
+
+
+@planning_bp.route("/api/projects/<project_id>/chat/replay-demo", methods=["GET"])
+def export_project_chat_replay_demo(project_id: str):
+    project_store = current_app.extensions["project_store"]
+    project = project_store.get_project(project_id)
+    if project is None:
+        return jsonify({"success": False, "error": "project not found"}), 404
+
+    exported_at = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "schema_version": "1.0",
+        "exported_at": exported_at,
+        "project": {
+            "project_id": project.project_id,
+            "name": project.name,
+            "current_stage": project.current_stage.value,
+            "status": project.status.value,
+            "conversation_language": project.conversation_language,
+        },
+        "steps": _build_replay_demo_steps(project),
+        "timeline": project.build_timeline(),
+    }
+
+    return jsonify({"success": True, "data": payload})
 
 
 @planning_bp.route("/api/projects/<project_id>/chat", methods=["POST"])

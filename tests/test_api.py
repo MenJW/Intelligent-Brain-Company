@@ -183,6 +183,37 @@ def test_chat_history_includes_stage_and_employee_replay(tmp_path: Path) -> None
     assert any(item.get("source") == "employee_statement" for item in history_items)
 
 
+def test_chat_replay_demo_export_contains_stepwise_dialogue(tmp_path: Path) -> None:
+    app = make_test_app(tmp_path)
+    client = app.test_client()
+
+    created = client.post("/api/projects", json={"title": "Replay Export"}).get_json()["data"]
+    project_id = created["project_id"]
+    client.post("/api/planning/generate", json={"project_id": project_id})
+
+    chat = client.post(
+        f"/api/projects/{project_id}/chat",
+        json={"agent": "research", "message": "请给我一个市场验证步骤"},
+    )
+    assert chat.status_code == 200
+    turn = chat.get_json()["data"]["turn"]
+
+    exported = client.get(f"/api/projects/{project_id}/chat/replay-demo")
+    assert exported.status_code == 200
+    payload = exported.get_json()["data"]
+    assert payload["project"]["project_id"] == project_id
+    assert payload["steps"]
+    assert payload["timeline"]
+
+    turn_steps = [item for item in payload["steps"] if item.get("turn_id") == turn["turn_id"]]
+    kinds = {item["kind"] for item in turn_steps}
+    assert "user_message" in kinds
+    assert "assistant_message" in kinds
+
+    stage_steps = [item for item in payload["steps"] if item.get("kind") == "stage_output"]
+    assert stage_steps
+
+
 def test_department_chat_employee_roster_endpoint(tmp_path: Path) -> None:
     app = make_test_app(tmp_path)
     client = app.test_client()

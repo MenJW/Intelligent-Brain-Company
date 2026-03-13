@@ -24,6 +24,7 @@ const I18N = {
     promoteButton: '转成正式干预',
     promotedNoRegenerate: '已转为正式干预。请点击“执行下一环节”逐步重算。',
     employeePickerButton: '选择员工 @',
+    exportReplayButton: '导出回放 Demo',
     employeePickerNotDepartment: '当前角色不是部门角色，无可选员工。',
     employeePickerEmpty: '当前部门暂无可选员工。',
     employeeMentionHint: '点击后将插入 @员工 进行定向提问。',
@@ -34,6 +35,9 @@ const I18N = {
     impactSource: '来源',
     emptyCurrentStage: '当前环节下还没有可展示的记录。',
     emptyAll: '当前角色还没有对话记录。',
+    replayExporting: '正在导出回放 Demo...',
+    replayExported: '回放 Demo 已下载。',
+    replayExportFailed: '导出回放 Demo 失败',
     generatedFromTurn: '已根据 {turnId} 生成新版本。',
     agentNames: {
       research: '研究组',
@@ -61,6 +65,7 @@ const I18N = {
     promoteButton: 'Promote to intervention',
     promotedNoRegenerate: 'Promoted to intervention. Use "Run Next Stage" to regenerate step by step.',
     employeePickerButton: 'Pick Employee @',
+    exportReplayButton: 'Export Replay Demo',
     employeePickerNotDepartment: 'Current role is not a department role.',
     employeePickerEmpty: 'No employees available for this department.',
     employeeMentionHint: 'Click one to insert @mention for directed questions.',
@@ -71,6 +76,9 @@ const I18N = {
     impactSource: 'Source',
     emptyCurrentStage: 'No records available for the current stage yet.',
     emptyAll: 'No dialogue history for this role yet.',
+    replayExporting: 'Exporting replay demo...',
+    replayExported: 'Replay demo downloaded.',
+    replayExportFailed: 'Failed to export replay demo',
     generatedFromTurn: 'Generated a new version from {turnId}.',
     agentNames: {
       research: 'Research Team',
@@ -258,6 +266,7 @@ const chatStatus = document.getElementById('chat-status')
 const sendChatButton = document.getElementById('send-chat')
 const languageToggleButton = document.getElementById('language-toggle')
 const refreshChatButton = document.getElementById('refresh-chat')
+const exportReplayDemoButton = document.getElementById('export-replay-demo')
 const employeePickerToggleButton = document.getElementById('employee-picker-toggle')
 const employeePickerPanel = document.getElementById('employee-picker-panel')
 const generatePlanButton = document.getElementById('generate-plan')
@@ -353,6 +362,9 @@ function applyLanguageToChatUi() {
   if (employeePickerToggleButton) {
     employeePickerToggleButton.textContent = t('employeePickerButton')
   }
+  if (exportReplayDemoButton) {
+    exportReplayDemoButton.textContent = t('exportReplayButton')
+  }
   renderEmployeePicker(chatAgentSelect.value)
   if (!state.activeProject) {
     chatStatus.textContent = t('chatReady')
@@ -444,6 +456,7 @@ function resetProjectView() {
   sendChatButton.disabled = true
   languageToggleButton.disabled = true
   employeePickerToggleButton.disabled = true
+  exportReplayDemoButton.disabled = true
   employeePickerPanel.classList.add('hidden')
   employeePickerPanel.innerHTML = ''
   refreshChatButton.disabled = true
@@ -501,6 +514,7 @@ function showProject(project) {
   sendChatButton.disabled = false
   languageToggleButton.disabled = false
   employeePickerToggleButton.disabled = !isDepartmentAgent(chatAgentSelect.value)
+  exportReplayDemoButton.disabled = false
   refreshChatButton.disabled = false
   renderProjects()
   loadProgress(project.project_id)
@@ -842,6 +856,33 @@ async function loadChat(projectId, agent) {
   renderChat(data.agent, data.history)
 }
 
+function triggerDownload(filename, content) {
+  const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+}
+
+async function exportReplayDemo() {
+  if (!state.activeProject) return
+  chatStatus.textContent = t('replayExporting')
+  try {
+    const data = await api(`/api/projects/${state.activeProject.project_id}/chat/replay-demo`)
+    const exportedAt = String(data.exported_at || '').replace(/[:.]/g, '-')
+    const safeTime = exportedAt || new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `${state.activeProject.project_id}_replay_demo_${safeTime}.json`
+    triggerDownload(filename, JSON.stringify(data, null, 2))
+    chatStatus.textContent = t('replayExported')
+  } catch (error) {
+    chatStatus.textContent = `${t('replayExportFailed')}: ${error.message}`
+  }
+}
+
 async function promoteTurn(turnId) {
   if (!state.activeProject) return
   chatStatus.textContent = t('chatPromoting')
@@ -990,6 +1031,7 @@ refreshChatButton.addEventListener('click', async () => {
   if (!state.activeProject) return
   await loadChat(state.activeProject.project_id, chatAgentSelect.value)
 })
+exportReplayDemoButton.addEventListener('click', exportReplayDemo)
 chatAgentSelect.addEventListener('change', async () => {
   if (!state.activeProject) return
   employeePickerPanel.classList.add('hidden')
