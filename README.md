@@ -1,5 +1,12 @@
 # TOBECEO
-
+<div align="center">
+  <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/Framework-Flask-green.svg" alt="Framework">
+  <img src="https://img.shields.io/badge/Agent-MultiAgent-orange.svg" alt="MultiAgent">
+  <img src="https://img.shields.io/github/stars/MenJW/TO-BE-CEO?style=social" alt="GitHub Stars">
+  <img src="https://img.shields.io/github/license/MenJW/TO-BE-CEO" alt="License">
+  <img src="https://img.shields.io/github/last-commit/MenJW/TO-BE-CEO" alt="Last Commit">
+</div>
 An AI boardroom for startup ideas.
 
 Turn one raw idea into a structured company decision flow:
